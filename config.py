@@ -24,12 +24,14 @@ def _find_whisper_binary(base: Path) -> Path:
     """Eski `main` veya CMake `build/.../whisper-cli` (klasör yapısı sürüme göre değişir)."""
     env = os.getenv("WHISPER_BINARY", "").strip()
     if env:
-        p = Path(env).expanduser()
-        return p.resolve() if p.is_file() else p
+        p = Path(env).expanduser().resolve()
+        if p.is_file():
+            return p
+        # .env'de eski/hatalı yol varsa yok sayıp aşağıda otomatik ara
     rels = (
-        "main",
         "build/bin/whisper-cli",
         "build/bin/main",
+        "main",
         "build/bin/whisper",
         "build/whisper-cli",
         "build/whisper",
@@ -60,8 +62,9 @@ def _find_whisper_binary(base: Path) -> Path:
 def _find_whisper_model(base: Path) -> Path:
     env = os.getenv("WHISPER_MODEL", "").strip()
     if env:
-        p = Path(env).expanduser()
-        return p.resolve() if p.is_file() else p
+        p = Path(env).expanduser().resolve()
+        if p.is_file():
+            return p
     models_dir = base / "models"
     if models_dir.is_dir():
         for name in (
