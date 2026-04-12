@@ -71,15 +71,34 @@ def synthesize_openai_tts(text: str) -> bytes:
 
 
 def _find_piper_model() -> tuple[Path, Optional[Path]]:
-    d = config.PIPER_MODEL_DIR
-    onnx = list(d.glob("*.onnx"))
+    """Önce PIPER_MODEL_DIR, yoksa models/ kökünde düz .onnx (Rhasspy indirme düzeni)."""
+    dirs = [config.PIPER_MODEL_DIR, config.MODELS_DIR]
+    seen: set[Path] = set()
+    search_dirs = []
+    for d in dirs:
+        d = Path(d).resolve()
+        if d in seen:
+            continue
+        seen.add(d)
+        search_dirs.append(d)
+
+    onnx: list[Path] = []
+    for d in search_dirs:
+        if d.is_dir():
+            onnx = sorted(d.glob("*.onnx"))
+            if onnx:
+                break
     if not onnx:
-        raise FileNotFoundError(f"Piper .onnx bulunamadı: {d}")
+        raise FileNotFoundError(
+            f"Piper .onnx bulunamadı. Şunlardan birine koyun: "
+            f"{config.PIPER_MODEL_DIR} veya {config.MODELS_DIR}"
+        )
     model = onnx[0]
     json_path = model.with_suffix(".onnx.json")
     if not json_path.is_file():
-        json_path = next(d.glob("*.json"), None)
-    return model, json_path
+        parent = model.parent
+        json_path = next(parent.glob("*.onnx.json"), None) or next(parent.glob("*.json"), None)
+    return model, json_path if json_path and json_path.is_file() else None
 
 
 def synthesize_piper(text: str) -> bytes:
