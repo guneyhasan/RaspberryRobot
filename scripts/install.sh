@@ -20,6 +20,8 @@ fi
 source "$ROOT/venv/bin/activate"
 pip install --upgrade pip
 pip install -r "$ROOT/requirements.txt"
+echo "[install] Not: OpenWakeWord Pi'de çoğu zaman kurulmaz (tflite-runtime ARM tekerleği yok)."
+echo "       USE_OPENWAKEWORD=0 bırakın veya gerekiyorsa: pip install -r requirements-optional.txt"
 
 mkdir -p "$ROOT/data" "$ROOT/logs" "$ROOT/models"
 

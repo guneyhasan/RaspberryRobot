@@ -1,0 +1,6 @@
+# OpenWakeWord — birçok ARM/Linux ortamında PyPI'da tflite-runtime olmadığı için kurulamaz.
+# Varsayılan: USE_OPENWAKEWORD=0 ve transkriptte "kanka/cihan/hey robot" ile uyandırma.
+# Sadece x86_64 veya tflite'ı elle kurabildiğiniz ortamda deneyin:
+#   pip install -r requirements-optional.txt
+
+openwakeword>=0.6.0
