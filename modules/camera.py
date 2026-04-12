@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -30,6 +31,19 @@ def is_camera_enabled() -> bool:
     return _camera_enabled
 
 
+def _still_binary() -> str:
+    """Yeni imajlarda rpicam-still, eskilerde libcamera-still bulunur."""
+    for name in ("rpicam-still", "libcamera-still"):
+        p = shutil.which(name)
+        if p:
+            return p
+    raise RuntimeError(
+        "Kamera aracı bulunamadı (rpicam-still / libcamera-still). "
+        "Kurulum: sudo apt update && sudo apt install -y rpicam-apps "
+        "(veya: libcamera-apps)"
+    )
+
+
 def capture_image(path: Optional[Path] = None) -> Path:
     if not _camera_enabled:
         raise RuntimeError("Kamera kapalı — önce gözlerini aç.")
@@ -39,9 +53,10 @@ def capture_image(path: Optional[Path] = None) -> Path:
         fd, name = tempfile.mkstemp(suffix=".jpg", prefix="kanka_cam_")
         os.close(fd)
         out = Path(name)
+    still = _still_binary()
     r = subprocess.run(
         [
-            "libcamera-still",
+            still,
             "-o",
             str(out),
             "--immediate",
@@ -56,7 +71,7 @@ def capture_image(path: Optional[Path] = None) -> Path:
     _last_capture_ts = time.time()
     if r.returncode != 0:
         err = (r.stderr or r.stdout or "").strip()
-        logger.error("libcamera-still hata: %s", err)
+        logger.error("%s hata: %s", still, err)
         raise RuntimeError(f"Kamera çekimi başarısız: {err[:300]}")
     if not out.is_file() or out.stat().st_size < 100:
         raise RuntimeError("Boş veya geçersiz görüntü dosyası.")
