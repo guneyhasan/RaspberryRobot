@@ -1,0 +1,96 @@
+"""OpenAI Chat Completions — sadece metin."""
+from __future__ import annotations
+
+import logging
+import time
+from typing import Any, Optional
+
+from openai import APIError, APITimeoutError, OpenAI, RateLimitError
+
+import config
+
+logger = logging.getLogger(__name__)
+
+_client: Optional[OpenAI] = None
+
+
+def _get_client() -> OpenAI:
+    global _client
+    if _client is None:
+        _client = OpenAI(api_key=config.OPENAI_API_KEY, timeout=config.TIMEOUT_SECONDS)
+    return _client
+
+
+def _daily_count() -> int:
+    import json
+    from datetime import date
+
+    f = config.REQUEST_COUNTER_FILE
+    today = str(date.today())
+    if not f.is_file():
+        return 0
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+        if data.get("day") != today:
+            return 0
+        return int(data.get("n", 0))
+    except (ValueError, json.JSONDecodeError, TypeError):
+        return 0
+
+
+def _bump_daily() -> None:
+    import json
+    from datetime import date
+
+    config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    today = str(date.today())
+    n = 0
+    if config.REQUEST_COUNTER_FILE.is_file():
+        try:
+            data = json.loads(config.REQUEST_COUNTER_FILE.read_text(encoding="utf-8"))
+            if data.get("day") == today:
+                n = int(data.get("n", 0))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
+    n += 1
+    config.REQUEST_COUNTER_FILE.write_text(
+        json.dumps({"day": today, "n": n}),
+        encoding="utf-8",
+    )
+
+
+def bump_request_count() -> None:
+    """Vision vb. ek OpenAI çağrıları için günlük sayaç."""
+    _bump_daily()
+
+
+def ensure_daily_quota() -> None:
+    if _daily_count() >= config.MAX_DAILY_REQUESTS:
+        raise RuntimeError("Günlük istek limiti aşıldı")
+
+
+def ask_openai(messages: list[dict[str, Any]]) -> str:
+    if not config.OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY yok")
+
+    ensure_daily_quota()
+
+    client = _get_client()
+    last_err: Optional[Exception] = None
+    delay = 1.0
+    for attempt in range(config.RETRY_ATTEMPTS + 1):
+        try:
+            resp = client.chat.completions.create(
+                model=config.MODEL,
+                messages=messages,
+                max_tokens=config.MAX_TOKENS,
+            )
+            _bump_daily()
+            choice = resp.choices[0]
+            return (choice.message.content or "").strip()
+        except (APITimeoutError, RateLimitError, APIError) as e:
+            last_err = e
+            logger.warning("OpenAI deneme %s başarısız: %s", attempt + 1, e)
+            time.sleep(delay)
+            delay *= 2
+    raise RuntimeError(f"OpenAI başarısız: {last_err}")

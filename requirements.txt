@@ -1,0 +1,9 @@
+openai>=1.40.0
+python-dotenv>=1.0.0
+numpy>=1.24.0
+sounddevice>=0.4.6
+torch>=2.0.0
+torchaudio>=2.0.0
+silero-vad>=4.0.0
+openwakeword>=0.6.0
+pvporcupine>=3.0.0

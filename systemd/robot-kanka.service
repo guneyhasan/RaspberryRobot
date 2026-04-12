@@ -1,0 +1,23 @@
+[Unit]
+Description=Robot Kanka AI Service
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=robot
+Group=robot
+WorkingDirectory=/home/robot/kanka
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/robot/kanka/.env
+ExecStartPre=/home/robot/kanka/scripts/health_check.sh
+ExecStart=/home/robot/kanka/venv/bin/python /home/robot/kanka/main.py
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=3
+StandardOutput=append:/var/log/robot-kanka.log
+StandardError=append:/var/log/robot-kanka-error.log
+
+[Install]
+WantedBy=multi-user.target

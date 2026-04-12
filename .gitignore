@@ -1,0 +1,10 @@
+.env
+venv/
+__pycache__/
+*.pyc
+*.wav
+*.mp3
+logs/*.log
+.DS_Store
+whisper.cpp/
+*.ggml

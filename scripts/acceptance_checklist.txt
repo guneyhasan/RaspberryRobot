@@ -1,0 +1,15 @@
+Robot Kanka — kabul testleri (T1–T10)
+Yol haritası bölüm 8 ile aynı. Pi üzerinde manuel işaretleyin.
+
+T1  PC kapalı, robotu prize tak — 30 sn içinde "Hazırım Cihan." benzeri anons
+T2  Türkçe: "Kanka nasılsın?" — tek seferde anlar, Türkçe cevap
+T3  10 dakika kesintisiz konuşma — çökme/donma yok
+T4  "Bak" veya "önümde ne var?" — fotoğraf + Türkçe yorum
+T5  İnternet kes, konuş — offline uyarı/Piper ile cevap
+T6  sudo reboot — mikrofon + hoparlör + TTS tekrar çalışır
+T7  /var/log/robot-kanka.log — HEARD / RESPONSE / TTS satırları
+T8  kill -9 [pid] — ~10 sn içinde systemd yeniden başlatır
+T9  "Bunu hatırla: ..." — sonraki konuşmada profilde görünür
+T10 Ortalama cevap süresi — hedef ~4 sn (STT+API+TTS)
+
+Not: T2 için USE_OPENWAKEWORD=0 iken cümlede wake ifadesi (kanka, cihan, hey robot) olmalı.
