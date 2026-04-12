@@ -1,6 +1,5 @@
-# OpenWakeWord — birçok ARM/Linux ortamında PyPI'da tflite-runtime olmadığı için kurulamaz.
-# Varsayılan: USE_OPENWAKEWORD=0 ve transkriptte "kanka/cihan/hey robot" ile uyandırma.
-# Sadece x86_64 veya tflite'ı elle kurabildiğiniz ortamda deneyin:
-#   pip install -r requirements-optional.txt
-
-openwakeword>=0.6.0
+# Bu dosya artık Robot Kanka venv'i için zorunlu ek yok.
+# Wyoming OpenWakeWord ayrı süreçte çalışır (Docker veya git clone + script/run):
+#   https://github.com/rhasspy/wyoming-openwakeword
+#
+# Robot tarafında sadece: pip install -r requirements.txt  (içinde `wyoming` istemci kütüphanesi var)

@@ -48,6 +48,9 @@ WAKE_PHRASES = tuple(
 
 PICOVOICE_ACCESS_KEY = os.getenv("PICOVOICE_ACCESS_KEY", "")
 
+# rhasspy/wyoming-openwakeword — ör. tcp://127.0.0.1:10400 (ayrı süreç veya Docker)
+WYOMING_OPENWAKEWORD_URI = os.getenv("WYOMING_OPENWAKEWORD_URI", "").strip()
+
 BASE_SYSTEM_PROMPT = """Sen "Kanka" adlı bir yapay zeka robottasın. Fiziksel varlığın var: tekerlekli bir robot gövdesi, iki kamera gözün ve sesle iletişim kuruyorsun.
 
 Kullanıcın: Cihan

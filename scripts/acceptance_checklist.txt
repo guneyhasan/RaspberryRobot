@@ -12,4 +12,5 @@ T8  kill -9 [pid] — ~10 sn içinde systemd yeniden başlatır
 T9  "Bunu hatırla: ..." — sonraki konuşmada profilde görünür
 T10 Ortalama cevap süresi — hedef ~4 sn (STT+API+TTS)
 
-Not: T2 için USE_OPENWAKEWORD=0 iken cümlede wake ifadesi (kanka, cihan, hey robot) olmalı.
+Not: WYOMING_OPENWAKEWORD_URI boşken cümlede wake ifadesi (kanka, cihan, hey robot) gerekir.
+      Wyoming sunucusu açıkken ses tabanlı wake Wyoming modeline bağlıdır.

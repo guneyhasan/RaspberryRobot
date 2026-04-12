@@ -20,8 +20,8 @@ fi
 source "$ROOT/venv/bin/activate"
 pip install --upgrade pip
 pip install -r "$ROOT/requirements.txt"
-echo "[install] Not: OpenWakeWord Pi'de çoğu zaman kurulmaz (tflite-runtime ARM tekerleği yok)."
-echo "       USE_OPENWAKEWORD=0 bırakın veya gerekiyorsa: pip install -r requirements-optional.txt"
+echo "[install] Wyoming OpenWakeWord ayrı süreç: scripts/run_wyoming_openwakeword.sh veya Docker."
+echo "       .env içinde WYOMING_OPENWAKEWORD_URI=tcp://127.0.0.1:10400 ile bağlanırsınız."
 
 mkdir -p "$ROOT/data" "$ROOT/logs" "$ROOT/models"
 
