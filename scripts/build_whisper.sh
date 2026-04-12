@@ -36,7 +36,10 @@ elif [[ -x build/bin/main ]]; then
 elif [[ -x main ]]; then
   echo "[build_whisper] İkili: $WSP/main"
 else
-  echo "[build_whisper] UYARI: whisper ikili bulunamadı, build çıktısına bakın."
+  echo "[build_whisper] UYARI: standart yolda ikili yok. build/ altında arama:"
+  find build -type f \( -name 'whisper-cli' -o -name 'whisper' -o -name 'main' \) 2>/dev/null | head -25 || true
+  echo "[build_whisper] Çalıştırılabilir tüm dosyalar (ilk 30):"
+  find build -type f -executable 2>/dev/null | head -30 || true
 fi
 
 if [[ -f models/download-ggml-model.sh ]]; then

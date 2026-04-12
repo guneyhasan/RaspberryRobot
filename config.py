@@ -21,22 +21,40 @@ WHISPER_CPP_DIR = Path(os.getenv("WHISPER_CPP_DIR", str(PROJECT_ROOT / "whisper.
 
 
 def _find_whisper_binary(base: Path) -> Path:
-    """Eski `main` veya yeni CMake çıktısı `build/bin/whisper-cli` vb."""
+    """Eski `main` veya CMake `build/.../whisper-cli` (klasör yapısı sürüme göre değişir)."""
     env = os.getenv("WHISPER_BINARY", "").strip()
     if env:
         p = Path(env).expanduser()
         return p.resolve() if p.is_file() else p
-    for rel in (
+    rels = (
         "main",
         "build/bin/whisper-cli",
         "build/bin/main",
         "build/bin/whisper",
         "build/whisper-cli",
-    ):
+        "build/whisper",
+        "build/Release/whisper-cli",
+        "build/Debug/whisper-cli",
+    )
+    for rel in rels:
         c = (base / rel).resolve()
         if c.is_file():
             return c
-    return (base / "main").resolve()
+    bdir = base / "build"
+    if bdir.is_dir():
+        candidates: list[Path] = []
+        for name in ("whisper-cli", "whisper"):
+            for p in bdir.rglob(name):
+                if p.is_file() and p.name == name:
+                    try:
+                        if p.stat().st_size < 30_000:
+                            continue
+                    except OSError:
+                        continue
+                    candidates.append(p.resolve())
+        if candidates:
+            return min(candidates, key=lambda x: (len(x.parts), str(x)))
+    return (base / "build" / "bin" / "whisper-cli").resolve()
 
 
 def _find_whisper_model(base: Path) -> Path:
