@@ -28,8 +28,15 @@ mkdir -p "$ROOT/data" "$ROOT/logs" "$ROOT/models"
 if [[ ! -d "$ROOT/whisper.cpp" ]]; then
   echo "[install] whisper.cpp klonlanıyor..."
   git clone https://github.com/ggerganov/whisper.cpp "$ROOT/whisper.cpp"
-  (cd "$ROOT/whisper.cpp" && make -j4)
-  bash "$ROOT/whisper.cpp/models/download-ggml-model.sh" small
+fi
+if [[ -d "$ROOT/whisper.cpp" ]] && [[ ! -f "$ROOT/whisper.cpp/main" ]] && [[ ! -f "$ROOT/whisper.cpp/build/bin/whisper-cli" ]]; then
+  echo "[install] whisper.cpp derleniyor (CMake veya make)..."
+  (cd "$ROOT/whisper.cpp" && \
+    { cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j4; } || \
+    { make -j4; })
+fi
+if [[ -d "$ROOT/whisper.cpp/models" ]] && [[ ! -f "$ROOT/whisper.cpp/models/ggml-small.bin" ]]; then
+  bash "$ROOT/whisper.cpp/models/download-ggml-model.sh" small || true
 fi
 
 echo "[install] Piper modeli: https://github.com/rhasspy/piper/releases adresinden"

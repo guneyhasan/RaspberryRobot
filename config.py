@@ -17,9 +17,48 @@ PROFILE_PATH = DATA_DIR / "cihan_profile.json"
 OFFLINE_RESPONSES_PATH = DATA_DIR / "offline_responses.json"
 CONVERSATIONS_PATH = DATA_DIR / "last_conversations.txt"
 
-WHISPER_CPP_DIR = Path(os.getenv("WHISPER_CPP_DIR", str(PROJECT_ROOT / "whisper.cpp")))
-WHISPER_BINARY = Path(os.getenv("WHISPER_BINARY", str(WHISPER_CPP_DIR / "main")))
-WHISPER_MODEL = Path(os.getenv("WHISPER_MODEL", str(WHISPER_CPP_DIR / "models" / "ggml-small.bin")))
+WHISPER_CPP_DIR = Path(os.getenv("WHISPER_CPP_DIR", str(PROJECT_ROOT / "whisper.cpp"))).resolve()
+
+
+def _find_whisper_binary(base: Path) -> Path:
+    """Eski `main` veya yeni CMake çıktısı `build/bin/whisper-cli` vb."""
+    env = os.getenv("WHISPER_BINARY", "").strip()
+    if env:
+        p = Path(env).expanduser()
+        return p.resolve() if p.is_file() else p
+    for rel in (
+        "main",
+        "build/bin/whisper-cli",
+        "build/bin/main",
+        "build/bin/whisper",
+        "build/whisper-cli",
+    ):
+        c = (base / rel).resolve()
+        if c.is_file():
+            return c
+    return (base / "main").resolve()
+
+
+def _find_whisper_model(base: Path) -> Path:
+    env = os.getenv("WHISPER_MODEL", "").strip()
+    if env:
+        p = Path(env).expanduser()
+        return p.resolve() if p.is_file() else p
+    models_dir = base / "models"
+    if models_dir.is_dir():
+        for name in (
+            "ggml-small.bin",
+            "ggml-small-q5_0.bin",
+            "ggml-small-q8_0.bin",
+        ):
+            c = (models_dir / name).resolve()
+            if c.is_file():
+                return c
+    return (base / "models" / "ggml-small.bin").resolve()
+
+
+WHISPER_BINARY = _find_whisper_binary(WHISPER_CPP_DIR)
+WHISPER_MODEL = _find_whisper_model(WHISPER_CPP_DIR)
 
 PIPER_BINARY = os.getenv("PIPER_BINARY", "piper")
 PIPER_MODEL_DIR = Path(os.getenv("PIPER_MODEL_DIR", str(MODELS_DIR / "tr_TR-ahmet-medium")))
