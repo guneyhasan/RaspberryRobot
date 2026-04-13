@@ -2,6 +2,63 @@
 # Tek komutla temel kurulum (Pi üzerinde çalıştırın)
 set -euo pipefail
 
+echo "[install] Kamera overlay (imx219) kontrol ediliyor..."
+BOOT_CONFIG=""
+if [[ -f /boot/firmware/config.txt ]]; then
+  BOOT_CONFIG="/boot/firmware/config.txt"
+elif [[ -f /boot/config.txt ]]; then
+  BOOT_CONFIG="/boot/config.txt"
+fi
+if [[ -n "${BOOT_CONFIG}" ]]; then
+  if ! sudo grep -qE '^\s*dtoverlay=imx219,cam0\s*$' "${BOOT_CONFIG}"; then
+    echo "[install] ${BOOT_CONFIG} içine dtoverlay=imx219,cam0 ekleniyor..."
+    sudo cp -n "${BOOT_CONFIG}" "${BOOT_CONFIG}.bak" 2>/dev/null || true
+    echo "dtoverlay=imx219,cam0" | sudo tee -a "${BOOT_CONFIG}" >/dev/null
+  else
+    echo "[install] dtoverlay zaten var."
+  fi
+else
+  echo "[install] Boot config bulunamadı (/boot/firmware/config.txt veya /boot/config.txt). Atlanıyor."
+fi
+
+echo "[install] Robot HAT kurulumu (sunfounder/robot-hat)..."
+ROBOT_HAT_DIR="${HOME}/robot-hat"
+if [[ ! -d "${ROBOT_HAT_DIR}" ]]; then
+  git clone https://github.com/sunfounder/robot-hat.git "${ROBOT_HAT_DIR}"
+else
+  echo "[install] ${ROBOT_HAT_DIR} zaten var, güncelleniyor..."
+  (cd "${ROBOT_HAT_DIR}" && git pull --ff-only) || true
+fi
+if [[ -f "${ROBOT_HAT_DIR}/setup.py" ]]; then
+  (cd "${ROBOT_HAT_DIR}" && sudo python3 setup.py install)
+fi
+if [[ -f "${ROBOT_HAT_DIR}/i2samp.sh" ]]; then
+  (cd "${ROBOT_HAT_DIR}" && sudo bash i2samp.sh) || true
+fi
+
+echo "[install] ALSA (.asoundrc) ayarlanıyor..."
+cat > "${HOME}/.asoundrc" <<'EOF'
+pcm.hb {
+    type plug
+    slave.pcm "hw:CARD=sndrpihifiberry,DEV=0"
+}
+
+ctl.hb {
+    type hw
+    card sndrpihifiberry
+}
+EOF
+
+pkill -f speaker-test 2>/dev/null || true
+pkill -f aplay 2>/dev/null || true
+
+if command -v speaker-test >/dev/null 2>&1; then
+  echo "[install] speaker-test (hb) kısa test..."
+  speaker-test -D hb -c 2 -t sine -l 1 || true
+else
+  echo "[install] speaker-test yok, ses testi atlandı."
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "$ROOT"

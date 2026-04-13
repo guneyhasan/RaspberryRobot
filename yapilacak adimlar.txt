@@ -1,0 +1,29 @@
+kamera
+sudo nano /boot/firmware/config.txt
+dtoverlay=imx219,cam0
+
+
+robot donanimlari 
+
+cd ~
+git clone https://github.com/sunfounder/robot-hat.git
+cd robot-hat
+sudo python3 setup.py install
+sudo bash i2samp.sh
+
+cat > ~/.asoundrc <<'EOF'
+pcm.hb {
+    type plug
+    slave.pcm "hw:CARD=sndrpihifiberry,DEV=0"
+}
+
+ctl.hb {
+    type hw
+    card sndrpihifiberry
+}
+EOF
+
+pkill -f speaker-test 2>/dev/null || true
+pkill -f aplay 2>/dev/null || true
+
+speaker-test -D hb -c 2 -t sine
