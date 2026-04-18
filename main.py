@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -59,8 +60,23 @@ def _safe_preview(text: str, limit: int = 220) -> str:
 
 
 def _has_any_phrase(text: str, phrases: tuple[str, ...]) -> bool:
-    low = (text or "").lower()
-    return any(p in low for p in phrases) if phrases else False
+    def norm(s: str) -> str:
+        # casefold: Türkçe I/İ gibi harflerde daha güvenilir
+        s = (s or "").casefold()
+        # noktalama/emoji vs temizle
+        s = re.sub(r"[^0-9a-zA-Zçğıöşü\s]", " ", s, flags=re.UNICODE)
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    t = norm(text or "")
+    if not phrases:
+        return False
+    for p in phrases:
+        if not p:
+            continue
+        if norm(p) in t:
+            return True
+    return False
 
 
 def route_intents(text: str) -> str | None:
@@ -119,6 +135,11 @@ def run_loop() -> None:
         wake_word.audio_wake_enabled(),
         config.REQUIRE_WAKE_PHRASE,
         ", ".join(config.WAKE_PHRASES) if config.WAKE_PHRASES else "(boş)",
+    )
+    logger.info(
+        "Konuşma modu tetikleri: activate=%s | deactivate=%s",
+        ", ".join(config.CONVERSATION_ACTIVATE_PHRASES) if config.CONVERSATION_ACTIVATE_PHRASES else "(boş)",
+        ", ".join(config.CONVERSATION_DEACTIVATE_PHRASES) if config.CONVERSATION_DEACTIVATE_PHRASES else "(boş)",
     )
 
     try:
