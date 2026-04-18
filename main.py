@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import config  # noqa: E402
-from modules import camera, llm, memory, stt, tts, wake_word  # noqa: E402
+from modules import battery, camera, llm, memory, stt, tts, wake_word  # noqa: E402
 from modules import health  # noqa: E402
 
 logger = logging.getLogger("robot_kanka")
@@ -146,6 +146,40 @@ def run_loop() -> None:
         tts.speak(config.STARTUP_PHRASE, prefer_online=False)
     except Exception as e:
         logger.warning("Açılış anonsu atlandı: %s", e)
+
+    # Pil izleme thread'i (Robot-HAT voltajından % hesaplar)
+    import threading
+    import subprocess
+
+    stop_batt = threading.Event()
+
+    def _batt_drop(percent: int, voltage: float) -> None:
+        msg = f"Kanka şarjım yüzde {percent}. Bir ara şarja takar mısın?"
+        _log_line("BATTERY", f"drop_10pct | {percent}% | {voltage:.2f}V | announce")
+        try:
+            tts.speak(msg, prefer_online=False)
+        except Exception as e:
+            logger.warning("Pil uyarı TTS atlandı: %s", e)
+
+    def _batt_critical(percent: int, voltage: float) -> None:
+        msg = "Kanka şarjım bitmek üzere. Beni şarja takar mısın? Kapanıyorum."
+        _log_line("BATTERY", f"critical | {percent}% | {voltage:.2f}V | poweroff")
+        try:
+            tts.speak(msg, prefer_online=False)
+        except Exception as e:
+            logger.warning("Kritik pil TTS atlandı: %s", e)
+        try:
+            subprocess.run(["sudo", "poweroff"], check=False)
+        except Exception as e:
+            logger.error("poweroff çalıştırılamadı: %s", e)
+
+    batt_th = threading.Thread(
+        target=battery.monitor_loop,
+        kwargs={"on_drop_10pct": _batt_drop, "on_critical": _batt_critical, "stop_event": stop_batt},
+        daemon=True,
+        name="battery-monitor",
+    )
+    batt_th.start()
 
     seq = 0
     conversation_mode = False
@@ -285,6 +319,7 @@ def run_loop() -> None:
 
         except KeyboardInterrupt:
             logger.info("Kullanıcı durdurdu.")
+            stop_batt.set()
             break
         except Exception:
             logger.exception("Ana döngü hatası")

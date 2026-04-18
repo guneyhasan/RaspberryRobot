@@ -103,6 +103,13 @@ AUDIO_INPUT_ALSA_DEVICE = os.getenv("AUDIO_INPUT_ALSA_DEVICE", "").strip()
 # If empty, `aplay` uses the default ALSA device.
 AUDIO_OUTPUT_ALSA_DEVICE = os.getenv("AUDIO_OUTPUT_ALSA_DEVICE", "").strip()
 
+# Battery monitoring (Robot-HAT voltage → %).
+# 2S Li-ion pack typical: 8.4V full, ~6.4V empty (under load değişir).
+BATTERY_VOLTAGE_MIN = float(os.getenv("BATTERY_VOLTAGE_MIN", "6.4"))
+BATTERY_VOLTAGE_MAX = float(os.getenv("BATTERY_VOLTAGE_MAX", "8.4"))
+BATTERY_POLL_SEC = float(os.getenv("BATTERY_POLL_SEC", "20"))
+BATTERY_CRITICAL_PERCENT = int(os.getenv("BATTERY_CRITICAL_PERCENT", "10"))
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 MODEL = os.getenv("MODEL", "gpt-4o-mini")
 VISION_MODEL = os.getenv("VISION_MODEL", "gpt-4o")
