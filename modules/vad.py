@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import time
 from typing import Optional
 
 import numpy as np
@@ -111,6 +112,7 @@ def record_utterance(
         silence_run = 0
         speaking = False
         total = 0
+        t0 = time.perf_counter()
 
         p: subprocess.Popen[bytes] | None = None
         try:
@@ -150,9 +152,19 @@ def record_utterance(
                 except Exception:
                     pass
 
+        t1 = time.perf_counter()
         if not audio_parts:
+            logger.info("VAD(arecord): konuşma yok (elapsed=%0.1fs, total_samples=%s)", t1 - t0, total)
             return None
-        return np.concatenate(audio_parts, axis=0)
+        out = np.concatenate(audio_parts, axis=0)
+        logger.info(
+            "VAD(arecord): segment çıktı (elapsed=%0.1fs, total_samples=%s, out_samples=%s, out_sec=%0.2f)",
+            t1 - t0,
+            total,
+            len(out),
+            len(out) / float(sr),
+        )
+        return out
 
     try:
         if config.AUDIO_INPUT_ALSA_DEVICE:
@@ -163,6 +175,7 @@ def record_utterance(
             # sounddevice accepts index (int) or substring name (str)
             device = int(config.AUDIO_INPUT_DEVICE) if config.AUDIO_INPUT_DEVICE.isdigit() else config.AUDIO_INPUT_DEVICE
             logger.info("Mikrofon cihazı seçildi (AUDIO_INPUT_DEVICE=%r)", config.AUDIO_INPUT_DEVICE)
+        logger.info("VAD kayıt backend=sounddevice device=%r sr=%s", device, sr)
         with sd.InputStream(
             channels=1,
             samplerate=sr,
@@ -170,6 +183,7 @@ def record_utterance(
             blocksize=chunk_samples,
             device=device,
         ) as stream:
+            t0 = time.perf_counter()
             while total < max_samples:
                 data, _ = stream.read(chunk_samples)
                 mono = data[:, 0].copy()
@@ -191,9 +205,19 @@ def record_utterance(
         logger.exception("Mikrofon/VAD hatası: %s", e)
         return None
 
+    t1 = time.perf_counter()
     if not audio_parts:
+        logger.info("VAD(sounddevice): konuşma yok (elapsed=%0.1fs, total_samples=%s)", t1 - t0, total)
         return None
-    return np.concatenate(audio_parts, axis=0)
+    out = np.concatenate(audio_parts, axis=0)
+    logger.info(
+        "VAD(sounddevice): segment çıktı (elapsed=%0.1fs, total_samples=%s, out_samples=%s, out_sec=%0.2f)",
+        t1 - t0,
+        total,
+        len(out),
+        len(out) / float(sr),
+    )
+    return out
 
 
 def save_wav_int16(path, audio: np.ndarray, sample_rate: int | None = None) -> None:

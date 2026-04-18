@@ -5,6 +5,7 @@ import logging
 import re
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 import numpy as np
@@ -60,9 +61,29 @@ def listen_and_transcribe() -> tuple[str, float]:
     """VAD → ses tabanlı wake (varsa) → whisper."""
     from modules import wake_word
 
+    t0 = time.perf_counter()
+    logger.info("STT: dinleme başlıyor (sr=%s, vad_thr=%.2f, silence_end=%.1fs, max=%.1fs)", config.SAMPLE_RATE, config.VAD_THRESHOLD, config.SILENCE_END_SEC, config.MAX_UTTERANCE_SEC)
     audio = vad.record_utterance()
-    if audio is None or len(audio) < 1000:
+    t1 = time.perf_counter()
+    if audio is None:
+        logger.info("STT: VAD konuşma bulamadı (elapsed=%0.1fs)", t1 - t0)
         return "", 0.0
-    if not wake_word.passes_wake_gate(audio):
+    if len(audio) < 1000:
+        logger.info("STT: çok kısa segment (samples=%s, elapsed=%0.1fs) — atlandı", len(audio), t1 - t0)
         return "", 0.0
-    return transcribe_pcm(audio)
+
+    logger.info("STT: segment alındı (samples=%s, sec=%0.2f, elapsed=%0.1fs)", len(audio), len(audio) / float(config.SAMPLE_RATE), t1 - t0)
+
+    t_w0 = time.perf_counter()
+    wake_ok = wake_word.passes_wake_gate(audio)
+    t_w1 = time.perf_counter()
+    if not wake_ok:
+        logger.info("STT: wake gate geçmedi (elapsed=%0.1fs) — atlandı", t_w1 - t_w0)
+        return "", 0.0
+    logger.info("STT: wake gate geçti (elapsed=%0.1fs)", t_w1 - t_w0)
+
+    t_tr0 = time.perf_counter()
+    text, conf = transcribe_pcm(audio)
+    t_tr1 = time.perf_counter()
+    logger.info('STT: whisper çıktı (elapsed=%0.1fs, conf=%.2f) text="%s"', t_tr1 - t_tr0, conf, " ".join(text.split())[:220])
+    return text, conf
