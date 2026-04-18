@@ -4,6 +4,9 @@ python-dotenv>=1.0.0
 numpy>=1.24.0
 sounddevice>=0.4.6
 gpiozero
+lgpio
+pigpio
+RPi.GPIO
 smbus2
 pyaudio
 torch>=2.0.0
@@ -11,3 +14,4 @@ torchaudio>=2.0.0
 silero-vad>=4.0.0
 pvporcupine>=3.0.0
 wyoming>=1.5.0
+robot-hat
