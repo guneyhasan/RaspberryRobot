@@ -110,6 +110,21 @@ BATTERY_VOLTAGE_MAX = float(os.getenv("BATTERY_VOLTAGE_MAX", "8.4"))
 BATTERY_POLL_SEC = float(os.getenv("BATTERY_POLL_SEC", "20"))
 BATTERY_CRITICAL_PERCENT = int(os.getenv("BATTERY_CRITICAL_PERCENT", "10"))
 
+# Motion (Robot-HAT motor/servo)
+# Notlar:
+# - SunFounder robot-hat Motor.wheel(speed, motor_id) genelde -100..100 bekler (motor_id: 0/1)
+# - Servo.angle(deg) -90..90 aralığında çalışır
+MOTION_ENABLED = os.getenv("MOTION_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
+DRIVE_MOTOR_LEFT = int(os.getenv("DRIVE_MOTOR_LEFT", "0"))
+DRIVE_MOTOR_RIGHT = int(os.getenv("DRIVE_MOTOR_RIGHT", "1"))
+STEERING_SERVO_PORT = os.getenv("STEERING_SERVO_PORT", "P0").strip()  # ör: P0..P11
+STEERING_CENTER_DEG = float(os.getenv("STEERING_CENTER_DEG", "0"))
+STEERING_MIN_DEG = float(os.getenv("STEERING_MIN_DEG", "-35"))
+STEERING_MAX_DEG = float(os.getenv("STEERING_MAX_DEG", "35"))
+DEFAULT_DRIVE_THROTTLE = int(os.getenv("DEFAULT_DRIVE_THROTTLE", "55"))
+DEFAULT_TURN_DEG = float(os.getenv("DEFAULT_TURN_DEG", "25"))
+DEFAULT_MOVE_SECONDS = float(os.getenv("DEFAULT_MOVE_SECONDS", "1.0"))
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 MODEL = os.getenv("MODEL", "gpt-4o-mini")
 VISION_MODEL = os.getenv("VISION_MODEL", "gpt-4o")

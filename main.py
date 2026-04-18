@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import config  # noqa: E402
-from modules import battery, camera, llm, memory, stt, tts, wake_word  # noqa: E402
+from modules import battery, camera, llm, memory, motion, stt, tts, wake_word  # noqa: E402
 from modules import health  # noqa: E402
 
 logger = logging.getLogger("robot_kanka")
@@ -85,6 +85,60 @@ def route_intents(text: str) -> str | None:
         return mem_reply
 
     low = text.lower().strip()
+
+    # Hareket komutları (LLM'e gitmeden)
+    # Not: Güvenlik için kısa süreli hareket (DEFAULT_MOVE_SECONDS) şeklinde ele alıyoruz.
+    # "dur" komutu her zaman anında durdurur.
+    if any(w in low for w in ("dur", "stop", "bekle", "kapan", "fren")):
+        motion.safe_stop("voice_command_stop")
+        return "Tamam kanka, durdum."
+
+    # Basit yön komutları: ileri/geri/sağ/sol
+    forward_triggers = (
+        "ileri git",
+        "ileri",
+        "yürü",
+        "yuru",
+        "gaza bas",
+        "devam et",
+    )
+    backward_triggers = (
+        "geri gel",
+        "geri git",
+        "geri",
+        "kaç",
+        "kac",
+    )
+    left_triggers = ("sola dön", "sola don", "sol", "sola")
+    right_triggers = ("sağa dön", "saga dön", "saga don", "sağa don", "sağ", "sag", "sağa", "saga")
+
+    move_sec = float(getattr(config, "DEFAULT_MOVE_SECONDS", 1.0))
+    throttle = int(getattr(config, "DEFAULT_DRIVE_THROTTLE", 55))
+    turn_deg = float(getattr(config, "DEFAULT_TURN_DEG", 25.0))
+
+    if any(t in low for t in forward_triggers):
+        if not motion.is_available():
+            return "Hareket için Robot-HAT kütüphanesi hazır değil kanka."
+        motion.drive_for(throttle=throttle, steering=float(getattr(config, "STEERING_CENTER_DEG", 0.0)), seconds=move_sec)
+        return "Tamam kanka."
+
+    if any(t in low for t in backward_triggers):
+        if not motion.is_available():
+            return "Hareket için Robot-HAT kütüphanesi hazır değil kanka."
+        motion.drive_for(throttle=-abs(throttle), steering=float(getattr(config, "STEERING_CENTER_DEG", 0.0)), seconds=move_sec)
+        return "Tamam kanka."
+
+    if any(t in low for t in left_triggers):
+        if not motion.is_available():
+            return "Hareket için Robot-HAT kütüphanesi hazır değil kanka."
+        motion.drive_for(throttle=throttle, steering=-abs(turn_deg), seconds=move_sec)
+        return "Tamam kanka."
+
+    if any(t in low for t in right_triggers):
+        if not motion.is_available():
+            return "Hareket için Robot-HAT kütüphanesi hazır değil kanka."
+        motion.drive_for(throttle=throttle, steering=abs(turn_deg), seconds=move_sec)
+        return "Tamam kanka."
 
     # Pil durumu soruları (LLM'e gitmeden direkt yanıt)
     battery_triggers = (
@@ -191,6 +245,10 @@ def run_loop() -> None:
             tts.speak(msg, prefer_online=False)
         except Exception as e:
             logger.warning("Kritik pil TTS atlandı: %s", e)
+        try:
+            motion.safe_stop("battery_critical")
+        except Exception:
+            pass
         try:
             subprocess.run(["sudo", "poweroff"], check=False)
         except Exception as e:
@@ -343,9 +401,11 @@ def run_loop() -> None:
         except KeyboardInterrupt:
             logger.info("Kullanıcı durdurdu.")
             stop_batt.set()
+            motion.safe_stop("keyboard_interrupt")
             break
         except Exception:
             logger.exception("Ana döngü hatası")
+            motion.safe_stop("main_loop_exception")
             time.sleep(2)
 
 
