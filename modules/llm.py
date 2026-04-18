@@ -99,6 +99,19 @@ def _select_provider() -> str:
     raise RuntimeError("LLM anahtarı yok (OPENAI_API_KEY veya GROQ_API_KEY gerekli)")
 
 
+def selected_provider() -> str | None:
+    """Şu anki .env'e göre seçilecek provider (anahtar yoksa None)."""
+    try:
+        return _select_provider()
+    except Exception:
+        return None
+
+
+def is_available() -> bool:
+    """Herhangi bir LLM anahtarı var mı?"""
+    return bool(config.OPENAI_API_KEY or config.GROQ_API_KEY)
+
+
 def ask(messages: list[dict[str, Any]]) -> str:
     """
     OpenAI veya Groq üzerinden cevap döndürür (messages OpenAI formatında).

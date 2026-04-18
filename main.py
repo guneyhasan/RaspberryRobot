@@ -160,14 +160,18 @@ def run_loop() -> None:
             reply: str | None = route_intents(text)
             if reply is None:
                 has_net = tts.internet_available()
-                _log_line("ROUTE", f"{tid} | intent=none | internet_available={has_net} | openai_key={'yes' if bool(config.OPENAI_API_KEY) else 'no'}")
+                provider = llm.selected_provider() or "none"
+                _log_line(
+                    "ROUTE",
+                    f"{tid} | intent=none | internet_available={has_net} | llm_provider={provider} | llm_key={'yes' if llm.is_available() else 'no'}",
+                )
                 if not has_net:
                     reply = memory.get_offline_response(text)
                     _log_line("OFFLINE", f"{tid} | internet yok → offline_responses eşleşti mi? {'yes' if reply else 'no'}")
                 if reply is None:
-                    if not config.OPENAI_API_KEY:
+                    if not llm.is_available():
                         reply = memory.get_offline_response(text) or "Şu an bağlantı veya anahtar yok kanka."
-                        _log_line("ROUTE", f"{tid} | openai_key yok → offline/fallback seçildi")
+                        _log_line("ROUTE", f"{tid} | llm_key yok → offline/fallback seçildi")
                     else:
                         try:
                             _log_line("SENT_TO_LLM", text)
@@ -181,7 +185,7 @@ def run_loop() -> None:
                             t_llm1 = time.perf_counter()
                             _log_line(
                                 "LLM_OK",
-                                f'{tid} | model={config.MODEL} | elapsed={_fmt_ms(t_llm1 - t_llm0)} | reply_preview="{_safe_preview(reply)}"',
+                                f'{tid} | provider={llm.selected_provider()} | model={config.MODEL if (llm.selected_provider() or "")=="openai" else config.GROQ_MODEL} | elapsed={_fmt_ms(t_llm1 - t_llm0)} | reply_preview="{_safe_preview(reply)}"',
                             )
                         except Exception as e:
                             logger.warning("LLM hatası: %s", e)
