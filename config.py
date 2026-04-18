@@ -134,10 +134,12 @@ DRIVE_LEFT_PWM = _env_str("DRIVE_LEFT_PWM", "P13")
 DRIVE_LEFT_DIR = _env_str("DRIVE_LEFT_DIR", "D4")
 DRIVE_RIGHT_PWM = _env_str("DRIVE_RIGHT_PWM", "P12")
 DRIVE_RIGHT_DIR = _env_str("DRIVE_RIGHT_DIR", "D5")
-STEERING_SERVO_PORT = _env_str("STEERING_SERVO_PORT", "P0")  # ör: P0..P11
+# PiCar-X v2.0'da tipik servo kanalları:
+# - P0: kamera pan, P1: kamera tilt, P2: direksiyon
+STEERING_SERVO_PORT = _env_str("STEERING_SERVO_PORT", "P2")  # ör: P0..P11
 STEERING_CENTER_DEG = float(os.getenv("STEERING_CENTER_DEG", "0"))
-STEERING_MIN_DEG = float(os.getenv("STEERING_MIN_DEG", "-35"))
-STEERING_MAX_DEG = float(os.getenv("STEERING_MAX_DEG", "35"))
+STEERING_MIN_DEG = float(os.getenv("STEERING_MIN_DEG", "-30"))
+STEERING_MAX_DEG = float(os.getenv("STEERING_MAX_DEG", "30"))
 DEFAULT_DRIVE_THROTTLE = int(os.getenv("DEFAULT_DRIVE_THROTTLE", "55"))
 DEFAULT_TURN_DEG = float(os.getenv("DEFAULT_TURN_DEG", "25"))
 DEFAULT_MOVE_SECONDS = float(os.getenv("DEFAULT_MOVE_SECONDS", "1.0"))
