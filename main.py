@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import config  # noqa: E402
-from modules import battery, camera, llm, memory, motion, stt, tts, wake_word  # noqa: E402
+from modules import battery, camera, head, llm, memory, motion, stt, tts, wake_word  # noqa: E402
 from modules import health  # noqa: E402
 
 logger = logging.getLogger("robot_kanka")
@@ -85,6 +85,37 @@ def route_intents(text: str) -> str | None:
         return mem_reply
 
     low = text.lower().strip()
+
+    # Kafa (kamera pan/tilt) komutları
+    if any(p in low for p in ("kafayı ortala", "kafani ortala", "kafanı ortala", "kafa ortala")):
+        if not head.is_available():
+            return "Kafa servoları hazır değil kanka."
+        head.safe_center("voice_head_center")
+        return "Tamam kanka."
+
+    if any(p in low for p in ("kafa sağ", "kafayı sağa", "kafani saga", "kafanı sağa", "kafayi saga", "sağa bak", "saga bak")):
+        if not head.is_available():
+            return "Kafa servoları hazır değil kanka."
+        head.nudge(pan_delta=abs(float(getattr(config, "HEAD_NUDGE_DEG", 20.0))))
+        return "Tamam kanka."
+
+    if any(p in low for p in ("kafa sol", "kafayı sola", "kafani sola", "kafanı sola", "sola bak")):
+        if not head.is_available():
+            return "Kafa servoları hazır değil kanka."
+        head.nudge(pan_delta=-abs(float(getattr(config, "HEAD_NUDGE_DEG", 20.0))))
+        return "Tamam kanka."
+
+    if any(p in low for p in ("kafa yukarı", "kafayı yukarı", "kafani yukari", "kafanı yukarı", "yukarı bak", "yukari bak")):
+        if not head.is_available():
+            return "Kafa servoları hazır değil kanka."
+        head.nudge(tilt_delta=abs(float(getattr(config, "HEAD_NUDGE_DEG", 20.0))))
+        return "Tamam kanka."
+
+    if any(p in low for p in ("kafa aşağı", "kafayı aşağı", "kafani asagi", "kafanı aşağı", "aşağı bak", "asagi bak")):
+        if not head.is_available():
+            return "Kafa servoları hazır değil kanka."
+        head.nudge(tilt_delta=-abs(float(getattr(config, "HEAD_NUDGE_DEG", 20.0))))
+        return "Tamam kanka."
 
     # Hareket komutları (LLM'e gitmeden)
     # Not: Güvenlik için kısa süreli hareket (DEFAULT_MOVE_SECONDS) şeklinde ele alıyoruz.
