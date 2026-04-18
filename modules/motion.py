@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+import os
 from typing import Optional, Protocol
 
 import config
@@ -72,6 +73,14 @@ def _init_if_needed() -> None:
 
         class _MotorsBackend:
             def __init__(self) -> None:
+                # robot_hat==? bazı sürümlerde robot_hat.motor.Motors içinde `owner=User`
+                # kullanılıyor ama `User` globali tanımlı değil (NameError).
+                # Burada modül içine User enjekte ederek Motors()'u çalışır hale getiriyoruz.
+                import robot_hat.motor as motor_mod  # type: ignore
+
+                if not hasattr(motor_mod, "User"):
+                    setattr(motor_mod, "User", os.getenv("USER", "pi"))
+
                 from robot_hat import Motors  # type: ignore
 
                 self._motors = Motors()
