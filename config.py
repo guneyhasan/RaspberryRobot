@@ -19,6 +19,14 @@ CONVERSATIONS_PATH = DATA_DIR / "last_conversations.txt"
 
 WHISPER_CPP_DIR = Path(os.getenv("WHISPER_CPP_DIR", str(PROJECT_ROOT / "whisper.cpp"))).resolve()
 
+def _env_str(key: str, default: str = "") -> str:
+    """Boş string'i (KEY=) 'unset' gibi ele al."""
+    v = os.getenv(key)
+    if v is None:
+        return default
+    v = v.strip()
+    return v if v else default
+
 
 def _find_whisper_binary(base: Path) -> Path:
     """Eski `main` veya CMake `build/.../whisper-cli` (klasör yapısı sürüme göre değişir)."""
@@ -82,9 +90,9 @@ WHISPER_BINARY = _find_whisper_binary(WHISPER_CPP_DIR)
 WHISPER_MODEL = _find_whisper_model(WHISPER_CPP_DIR)
 WHISPER_THREADS = int(os.getenv("WHISPER_THREADS", "4"))
 
-PIPER_BINARY = os.getenv("PIPER_BINARY", "piper")
-PIPER_MODEL_DIR = Path(os.getenv("PIPER_MODEL_DIR", str(MODELS_DIR / "tr_TR-ahmet-medium")))
-PIPER_MODEL_PATH = os.getenv("PIPER_MODEL_PATH", "").strip()
+PIPER_BINARY = _env_str("PIPER_BINARY", "piper")
+PIPER_MODEL_DIR = Path(_env_str("PIPER_MODEL_DIR", str(MODELS_DIR / "tr_TR-ahmet-medium")))
+PIPER_MODEL_PATH = _env_str("PIPER_MODEL_PATH", "")
 
 SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
 VAD_THRESHOLD = float(os.getenv("VAD_THRESHOLD", "0.5"))
@@ -93,15 +101,15 @@ MAX_UTTERANCE_SEC = float(os.getenv("MAX_UTTERANCE_SEC", "30"))
 
 # sounddevice (PortAudio) input device selection.
 # Example: AUDIO_INPUT_DEVICE="USB PnP Sound Device" or AUDIO_INPUT_DEVICE="2"
-AUDIO_INPUT_DEVICE = os.getenv("AUDIO_INPUT_DEVICE", "").strip()
+AUDIO_INPUT_DEVICE = _env_str("AUDIO_INPUT_DEVICE", "")
 
 # ALSA input device override (arecord -D). Example: "plughw:3,0"
 # If set, VAD will read audio via `arecord` instead of PortAudio/sounddevice.
-AUDIO_INPUT_ALSA_DEVICE = os.getenv("AUDIO_INPUT_ALSA_DEVICE", "").strip()
+AUDIO_INPUT_ALSA_DEVICE = _env_str("AUDIO_INPUT_ALSA_DEVICE", "")
 
 # ALSA output device override (aplay -D). Example: "hb" (from ~/.asoundrc) or "plughw:0,0"
 # If empty, `aplay` uses the default ALSA device.
-AUDIO_OUTPUT_ALSA_DEVICE = os.getenv("AUDIO_OUTPUT_ALSA_DEVICE", "").strip()
+AUDIO_OUTPUT_ALSA_DEVICE = _env_str("AUDIO_OUTPUT_ALSA_DEVICE", "")
 
 # Battery monitoring (Robot-HAT voltage → %).
 # 2S Li-ion pack typical: 8.4V full, ~6.4V empty (under load değişir).
@@ -122,11 +130,11 @@ DRIVE_MOTOR_RIGHT = int(os.getenv("DRIVE_MOTOR_RIGHT", "2"))
 # PiCar-X (SunFounder) için yaygın varsayılanlar (picar-x v2.0 kaynaklarına göre):
 # - Sol arka:  DIR=D4, PWM=P13
 # - Sağ arka: DIR=D5, PWM=P12
-DRIVE_LEFT_PWM = os.getenv("DRIVE_LEFT_PWM", "P13").strip()
-DRIVE_LEFT_DIR = os.getenv("DRIVE_LEFT_DIR", "D4").strip()
-DRIVE_RIGHT_PWM = os.getenv("DRIVE_RIGHT_PWM", "P12").strip()
-DRIVE_RIGHT_DIR = os.getenv("DRIVE_RIGHT_DIR", "D5").strip()
-STEERING_SERVO_PORT = os.getenv("STEERING_SERVO_PORT", "P0").strip()  # ör: P0..P11
+DRIVE_LEFT_PWM = _env_str("DRIVE_LEFT_PWM", "P13")
+DRIVE_LEFT_DIR = _env_str("DRIVE_LEFT_DIR", "D4")
+DRIVE_RIGHT_PWM = _env_str("DRIVE_RIGHT_PWM", "P12")
+DRIVE_RIGHT_DIR = _env_str("DRIVE_RIGHT_DIR", "D5")
+STEERING_SERVO_PORT = _env_str("STEERING_SERVO_PORT", "P0")  # ör: P0..P11
 STEERING_CENTER_DEG = float(os.getenv("STEERING_CENTER_DEG", "0"))
 STEERING_MIN_DEG = float(os.getenv("STEERING_MIN_DEG", "-35"))
 STEERING_MAX_DEG = float(os.getenv("STEERING_MAX_DEG", "35"))
@@ -134,7 +142,7 @@ DEFAULT_DRIVE_THROTTLE = int(os.getenv("DEFAULT_DRIVE_THROTTLE", "55"))
 DEFAULT_TURN_DEG = float(os.getenv("DEFAULT_TURN_DEG", "25"))
 DEFAULT_MOVE_SECONDS = float(os.getenv("DEFAULT_MOVE_SECONDS", "1.0"))
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_API_KEY = _env_str("OPENAI_API_KEY", "")
 MODEL = os.getenv("MODEL", "gpt-4o-mini")
 VISION_MODEL = os.getenv("VISION_MODEL", "gpt-4o")
 TTS_VOICE = os.getenv("TTS_VOICE", "spruce")
@@ -145,12 +153,12 @@ RETRY_ATTEMPTS = int(os.getenv("RETRY_ATTEMPTS", "2"))
 # LLM provider selection:
 # - If only one of OPENAI_API_KEY / GROQ_API_KEY is set → auto
 # - If both are set → LLM_PROVIDER controls ("openai" or "groq"), default=openai
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
+GROQ_API_KEY = _env_str("GROQ_API_KEY", "")
+GROQ_MODEL = _env_str("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_STREAM = os.getenv("GROQ_STREAM", "0").strip().lower() in ("1", "true", "yes", "on")
 GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.6"))
 GROQ_TOP_P = float(os.getenv("GROQ_TOP_P", "1"))
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "").strip().lower()
+LLM_PROVIDER = _env_str("LLM_PROVIDER", "").lower()
 
 MAX_DAILY_REQUESTS = int(os.getenv("MAX_DAILY_REQUESTS", "500"))
 REQUEST_COUNTER_FILE = LOGS_DIR / "daily_request_count.txt"
@@ -161,10 +169,10 @@ WAKE_PHRASES = tuple(
     if p.strip()
 )
 
-PICOVOICE_ACCESS_KEY = os.getenv("PICOVOICE_ACCESS_KEY", "")
+PICOVOICE_ACCESS_KEY = _env_str("PICOVOICE_ACCESS_KEY", "")
 
 # rhasspy/wyoming-openwakeword — ör. tcp://127.0.0.1:10400 (ayrı süreç veya Docker)
-WYOMING_OPENWAKEWORD_URI = os.getenv("WYOMING_OPENWAKEWORD_URI", "").strip()
+WYOMING_OPENWAKEWORD_URI = _env_str("WYOMING_OPENWAKEWORD_URI", "")
 
 # Debug veya geliştirme sırasında wake kelimesi zorunluluğunu kapatmak için:
 # REQUIRE_WAKE_PHRASE=0 → "kanka" demeden de cevap verir.
