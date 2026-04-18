@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Protocol
 
 import config
 
@@ -23,7 +23,13 @@ class MotionState:
     steering_deg: float  # servo açı hedefi
 
 
-_motor = None
+class _DriveBackend(Protocol):
+    def set_speed(self, speed: int) -> None: ...
+
+    def stop(self) -> None: ...
+
+
+_drive: Optional[_DriveBackend] = None
 _servo = None
 _initialized = False
 _state = MotionState(throttle=0, steering_deg=float(getattr(config, "STEERING_CENTER_DEG", 0.0)))
@@ -44,7 +50,7 @@ def is_available() -> bool:
 
 
 def _init_if_needed() -> None:
-    global _initialized, _motor, _servo, _state
+    global _initialized, _drive, _servo, _state
     if _initialized:
         return
 
@@ -54,11 +60,87 @@ def _init_if_needed() -> None:
         return
 
     try:
-        from robot_hat import Motor, Servo  # type: ignore
+        from robot_hat import Servo  # type: ignore
 
-        _motor = Motor()
         servo_port = str(getattr(config, "STEERING_SERVO_PORT", "P0"))
         _servo = Servo(servo_port)
+
+        # Sürüş backend seçimi:
+        # 1) Robot-HAT v4 docs: `Motors()` ve motors[1].speed(...)
+        # 2) Bazı sürümlerde `Motor()` + wheel(speed, id)
+        # 3) Bazı sürümlerde `Motor(pwm, dir)` ile tek motor nesnesi (sol/sağ ayrı)
+
+        class _MotorsBackend:
+            def __init__(self) -> None:
+                from robot_hat import Motors  # type: ignore
+
+                self._motors = Motors()
+                self._l = int(getattr(config, "DRIVE_MOTOR_LEFT", 1))
+                self._r = int(getattr(config, "DRIVE_MOTOR_RIGHT", 2))
+
+            def set_speed(self, speed: int) -> None:
+                self._motors[self._l].speed(speed)
+                self._motors[self._r].speed(speed)
+
+            def stop(self) -> None:
+                self._motors.stop()
+
+        class _WheelBackend:
+            def __init__(self) -> None:
+                from robot_hat import Motor  # type: ignore
+
+                self._motor = Motor()
+                self._l = int(getattr(config, "DRIVE_MOTOR_LEFT", 0))
+                self._r = int(getattr(config, "DRIVE_MOTOR_RIGHT", 1))
+
+            def set_speed(self, speed: int) -> None:
+                self._motor.wheel(speed, self._l)
+                self._motor.wheel(speed, self._r)
+
+            def stop(self) -> None:
+                self._motor.wheel(0, self._l)
+                self._motor.wheel(0, self._r)
+
+        class _PinBackend:
+            def __init__(self) -> None:
+                from robot_hat import Motor  # type: ignore
+
+                lpwm = str(getattr(config, "DRIVE_LEFT_PWM", "")).strip()
+                ldir = str(getattr(config, "DRIVE_LEFT_DIR", "")).strip()
+                rpwm = str(getattr(config, "DRIVE_RIGHT_PWM", "")).strip()
+                rdir = str(getattr(config, "DRIVE_RIGHT_DIR", "")).strip()
+                if not (lpwm and ldir and rpwm and rdir):
+                    raise RuntimeError(
+                        "Motor(pwm, dir) backend için DRIVE_LEFT_PWM/DRIVE_LEFT_DIR/DRIVE_RIGHT_PWM/DRIVE_RIGHT_DIR gerekli."
+                    )
+                self._left = Motor(lpwm, ldir)
+                self._right = Motor(rpwm, rdir)
+
+            def set_speed(self, speed: int) -> None:
+                # Bu API genelde speed(-100..100) veya speed(-1..1) olabilir.
+                # Robot-HAT tarafında ölçek 0..100 yaygın; biz -100..100 gönderiyoruz.
+                if hasattr(self._left, "speed"):
+                    self._left.speed(speed)
+                    self._right.speed(speed)
+                else:
+                    # En kötü ihtimal: wheel benzeri
+                    self._left.wheel(speed)
+                    self._right.wheel(speed)
+
+            def stop(self) -> None:
+                self.set_speed(0)
+
+        backend_errs: list[str] = []
+        _drive = None
+        for ctor in (_MotorsBackend, _WheelBackend, _PinBackend):
+            try:
+                _drive = ctor()
+                break
+            except Exception as e:
+                backend_errs.append(f"{ctor.__name__}: {type(e).__name__}: {e}")
+
+        if _drive is None:
+            raise RuntimeError("Drive backend seçilemedi: " + " | ".join(backend_errs))
 
         # İlk güvenli durum
         steering_center = float(getattr(config, "STEERING_CENTER_DEG", 0.0))
@@ -66,26 +148,21 @@ def _init_if_needed() -> None:
         _apply_state()
 
         _initialized = True
-        logger.info("Motion hazır: Motor() + Servo(%s)", servo_port)
+        logger.info("Motion hazır: drive_backend=%s + Servo(%s)", type(_drive).__name__ if _drive else "none", servo_port)
     except Exception as e:
         _initialized = True
-        _motor = None
+        _drive = None
         _servo = None
         logger.warning("robot_hat motion init başarısız: %s", e)
 
 
 def _apply_state() -> None:
     """Mevcut _state'i donanıma uygular (varsa)."""
-    if _motor is None or _servo is None:
+    if _drive is None or _servo is None:
         return
 
     throttle = int(_clamp(float(_state.throttle), -100.0, 100.0))
-    left = int(getattr(config, "DRIVE_MOTOR_LEFT", 0))
-    right = int(getattr(config, "DRIVE_MOTOR_RIGHT", 1))
-
-    # robot_hat Motor.wheel(speed, motor_id) bekler. motor_id: 0/1
-    _motor.wheel(throttle, left)
-    _motor.wheel(throttle, right)
+    _drive.set_speed(throttle)
 
     # robot_hat Servo.angle(deg) bekler. docs: -90..90
     _servo.angle(float(_state.steering_deg))

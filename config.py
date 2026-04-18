@@ -115,8 +115,14 @@ BATTERY_CRITICAL_PERCENT = int(os.getenv("BATTERY_CRITICAL_PERCENT", "10"))
 # - SunFounder robot-hat Motor.wheel(speed, motor_id) genelde -100..100 bekler (motor_id: 0/1)
 # - Servo.angle(deg) -90..90 aralığında çalışır
 MOTION_ENABLED = os.getenv("MOTION_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
-DRIVE_MOTOR_LEFT = int(os.getenv("DRIVE_MOTOR_LEFT", "0"))
-DRIVE_MOTOR_RIGHT = int(os.getenv("DRIVE_MOTOR_RIGHT", "1"))
+DRIVE_MOTOR_LEFT = int(os.getenv("DRIVE_MOTOR_LEFT", "1"))
+DRIVE_MOTOR_RIGHT = int(os.getenv("DRIVE_MOTOR_RIGHT", "2"))
+# Bazı robot_hat sürümlerinde Motor(pwm, dir) imzası var. O durumda pin/portları doldurun.
+# Örnek formatlar sürüme göre değişebilir: "P12", "P13" veya BCM numarası gibi.
+DRIVE_LEFT_PWM = os.getenv("DRIVE_LEFT_PWM", "").strip()
+DRIVE_LEFT_DIR = os.getenv("DRIVE_LEFT_DIR", "").strip()
+DRIVE_RIGHT_PWM = os.getenv("DRIVE_RIGHT_PWM", "").strip()
+DRIVE_RIGHT_DIR = os.getenv("DRIVE_RIGHT_DIR", "").strip()
 STEERING_SERVO_PORT = os.getenv("STEERING_SERVO_PORT", "P0").strip()  # ör: P0..P11
 STEERING_CENTER_DEG = float(os.getenv("STEERING_CENTER_DEG", "0"))
 STEERING_MIN_DEG = float(os.getenv("STEERING_MIN_DEG", "-35"))
