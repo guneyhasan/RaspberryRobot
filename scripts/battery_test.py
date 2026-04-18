@@ -32,8 +32,8 @@ def print_once() -> int:
         print("  bu genelde sistem site-packages'e kurulur ve venv bunu görmeyebilir.")
         print("")
         print("Çözüm seçenekleri:")
-        print("0) Eksik bağımlılığı kurun (bu hatada gpiozero):")
-        print("   pip install gpiozero")
+        print("0) Eksik bağımlılığı kurun (ör. gpiozero / smbus2):")
+        print("   pip install gpiozero smbus2")
         print("")
         print("1) Venv'i sistem paketlerini görecek şekilde oluşturun:")
         print("   python3 -m venv --system-site-packages venv")
@@ -56,6 +56,7 @@ def main() -> int:
     args = p.parse_args()
 
     if args.debug:
+        missing = None
         try:
             import robot_hat  # type: ignore
 
@@ -71,7 +72,12 @@ def main() -> int:
                 print("robot_hat.utils import/call failed:", type(e).__name__, e)
         except Exception as e:
             print("robot_hat import failed:", type(e).__name__, e)
+            if isinstance(e, ModuleNotFoundError):
+                missing = getattr(e, "name", None)
         print("")
+        if missing:
+            print(f"Öneri: pip install {missing}")
+            print("")
 
     if not args.watch:
         return print_once()
