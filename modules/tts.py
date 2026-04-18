@@ -40,8 +40,12 @@ def play_audio_file(path: Path) -> None:
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(path)
+    cmd = ["aplay"]
+    if config.AUDIO_OUTPUT_ALSA_DEVICE:
+        cmd.extend(["-D", config.AUDIO_OUTPUT_ALSA_DEVICE])
+    cmd.extend(["-q", str(path)])
     subprocess.run(
-        ["aplay", "-q", str(path)],
+        cmd,
         check=True,
         capture_output=True,
     )
