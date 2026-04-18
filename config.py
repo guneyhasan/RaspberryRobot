@@ -99,8 +99,8 @@ AUDIO_INPUT_DEVICE = os.getenv("AUDIO_INPUT_DEVICE", "").strip()
 # If set, VAD will read audio via `arecord` instead of PortAudio/sounddevice.
 AUDIO_INPUT_ALSA_DEVICE = os.getenv("AUDIO_INPUT_ALSA_DEVICE", "").strip()
 
-# ALSA output device override (aplay -D). Example: "hb" or "plughw:0,0"
-# If empty, aplay uses the system default output.
+# ALSA output device override (aplay -D). Example: "hb" (from ~/.asoundrc) or "plughw:0,0"
+# If empty, `aplay` uses the default ALSA device.
 AUDIO_OUTPUT_ALSA_DEVICE = os.getenv("AUDIO_OUTPUT_ALSA_DEVICE", "").strip()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

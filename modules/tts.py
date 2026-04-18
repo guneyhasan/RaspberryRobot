@@ -40,15 +40,18 @@ def play_audio_file(path: Path) -> None:
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(path)
-    cmd = ["aplay"]
+    cmd = ["aplay", "-q"]
     if config.AUDIO_OUTPUT_ALSA_DEVICE:
         cmd.extend(["-D", config.AUDIO_OUTPUT_ALSA_DEVICE])
-    cmd.extend(["-q", str(path)])
-    subprocess.run(
+    cmd.append(str(path))
+    r = subprocess.run(
         cmd,
         check=True,
         capture_output=True,
     )
+    # aplay normalde sessiz; debug için gerektiğinde stderr'i loglamak isteriz
+    if r.stderr:
+        logger.debug("aplay stderr: %s", r.stderr.decode("utf-8", errors="replace")[-500:])
 
 
 def play_audio_wav_bytes(data: bytes) -> None:
