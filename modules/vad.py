@@ -20,6 +20,18 @@ def _load_silero():
     global _model, _utils
     if _model is not None:
         return _model, _utils
+    # Öncelik: pip ile gelen `silero-vad` paketi (internet gerektirmez).
+    # Fallback: torch.hub (ilk kurulumda GitHub'a çıkar, yavaş bağlantıda timeout yapabilir).
+    try:
+        from silero_vad import load_silero_vad  # type: ignore
+
+        model = load_silero_vad()
+        _model, _utils = model, None
+        logger.info("VAD modeli yüklendi (backend=silero_vad paketi).")
+        return _model, _utils
+    except Exception as e:
+        logger.warning("silero_vad paketinden yüklenemedi, torch.hub denenecek: %s", e)
+
     model, utils = torch.hub.load(
         repo_or_dir="snakers4/silero-vad",
         model="silero_vad",
@@ -28,6 +40,7 @@ def _load_silero():
         trust_repo=True,
     )
     _model, _utils = model, utils
+    logger.info("VAD modeli yüklendi (backend=torch.hub).")
     return _model, _utils
 
 
