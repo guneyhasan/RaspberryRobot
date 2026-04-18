@@ -112,7 +112,7 @@ def _init_if_needed() -> None:
 
         class _PinBackend:
             def __init__(self) -> None:
-                from robot_hat import Motor  # type: ignore
+                from robot_hat import Motor, PWM, Pin  # type: ignore
 
                 lpwm = str(getattr(config, "DRIVE_LEFT_PWM", "")).strip()
                 ldir = str(getattr(config, "DRIVE_LEFT_DIR", "")).strip()
@@ -122,8 +122,9 @@ def _init_if_needed() -> None:
                     raise RuntimeError(
                         "Motor(pwm, dir) backend için DRIVE_LEFT_PWM/DRIVE_LEFT_DIR/DRIVE_RIGHT_PWM/DRIVE_RIGHT_DIR gerekli."
                     )
-                self._left = Motor(lpwm, ldir)
-                self._right = Motor(rpwm, rdir)
+                # Bu sürümde Motor, pwm için PWM nesnesi bekliyor.
+                self._left = Motor(PWM(lpwm), Pin(ldir))
+                self._right = Motor(PWM(rpwm), Pin(rdir))
 
             def set_speed(self, speed: int) -> None:
                 # Bu API genelde speed(-100..100) veya speed(-1..1) olabilir.
