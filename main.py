@@ -109,6 +109,13 @@ def run_loop() -> None:
     else:
         logger.info("Preflight: %s", msg)
 
+    logger.info(
+        "Wake ayarları: audio_wake=%s | require_wake_phrase=%s | wake_phrases=%s",
+        wake_word.audio_wake_enabled(),
+        config.REQUIRE_WAKE_PHRASE,
+        ", ".join(config.WAKE_PHRASES) if config.WAKE_PHRASES else "(boş)",
+    )
+
     try:
         tts.speak(config.STARTUP_PHRASE, prefer_online=False)
     except Exception as e:
@@ -136,12 +143,14 @@ def run_loop() -> None:
                 "STT",
                 f'{tid} | text="{_safe_preview(text)}" | confidence={conf:.2f} | total={_fmt_ms(t_listen1 - t_listen0)}',
             )
-            if not wake_word.audio_wake_enabled():
+            if not wake_word.audio_wake_enabled() and config.REQUIRE_WAKE_PHRASE:
                 ok_transcript = wake_word.transcript_has_wake_phrase(text)
                 _log_line("WAKE_TXT", f"{tid} | audio_wake=off | transcript_match={ok_transcript}")
                 if not ok_transcript:
                     _log_line("SKIP", f'{tid} | metin wake eşleşmedi | text="{_safe_preview(text)}"')
                     continue
+            elif not wake_word.audio_wake_enabled() and not config.REQUIRE_WAKE_PHRASE:
+                _log_line("WAKE_TXT", f"{tid} | audio_wake=off | require_wake_phrase=off | transcript_check=skipped")
             else:
                 _log_line("WAKE_AUDIO", f"{tid} | audio_wake=on (Wyoming/Porcupine) | transcript kontrolü opsiyonel")
 
