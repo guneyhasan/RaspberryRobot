@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import time
 from datetime import datetime
@@ -24,7 +25,9 @@ def setup_logging() -> None:
     log_path = config.LOGS_DIR / "robot-kanka-app.log"
     fmt = "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
     root = logging.getLogger()
-    root.setLevel(logging.INFO)
+    level_name = os.getenv("LOG_LEVEL", "INFO").upper().strip()
+    level = getattr(logging, level_name, logging.INFO)
+    root.setLevel(level)
     fh = logging.FileHandler(log_path, encoding="utf-8")
     fh.setFormatter(logging.Formatter(fmt))
     sh = logging.StreamHandler(sys.stdout)
@@ -38,6 +41,21 @@ def _log_line(kind: str, body: str) -> None:
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {kind}: {body}"
     logger.info(line)
+
+
+def _trace_id(seq: int) -> str:
+    return datetime.now().strftime("%Y%m%d-%H%M%S") + f"-{seq:05d}"
+
+
+def _fmt_ms(sec: float) -> str:
+    return f"{sec * 1000:.0f}ms"
+
+
+def _safe_preview(text: str, limit: int = 220) -> str:
+    t = " ".join((text or "").strip().split())
+    if len(t) <= limit:
+        return t
+    return t[: limit - 1] + "…"
 
 
 def route_intents(text: str) -> str | None:
@@ -96,25 +114,51 @@ def run_loop() -> None:
     except Exception as e:
         logger.warning("Açılış anonsu atlandı: %s", e)
 
+    seq = 0
     while True:
+        seq += 1
+        tid = _trace_id(seq)
+        _log_line("LOOP", f"{tid} | dinleme başladı (VAD → wake → STT → route → TTS)")
         try:
-            text, conf = stt.listen_and_transcribe()
+            t_listen0 = time.perf_counter()
+            try:
+                text, conf = stt.listen_and_transcribe()
+            except Exception as e:
+                _log_line("STT_ERROR", f"{tid} | listen_and_transcribe exception: {type(e).__name__}: {e}")
+                raise
+            t_listen1 = time.perf_counter()
+
             if not text.strip():
+                _log_line("SKIP", f"{tid} | konuşma yok / wake gate geçmedi | listen_total={_fmt_ms(t_listen1 - t_listen0)}")
                 continue
 
-            if not wake_word.audio_wake_enabled() and not wake_word.transcript_has_wake_phrase(text):
-                logger.debug("Metin wake eşleşmedi, atlandı: %s", text)
-                continue
+            _log_line(
+                "STT",
+                f'{tid} | text="{_safe_preview(text)}" | confidence={conf:.2f} | total={_fmt_ms(t_listen1 - t_listen0)}',
+            )
+            if not wake_word.audio_wake_enabled():
+                ok_transcript = wake_word.transcript_has_wake_phrase(text)
+                _log_line("WAKE_TXT", f"{tid} | audio_wake=off | transcript_match={ok_transcript}")
+                if not ok_transcript:
+                    _log_line("SKIP", f'{tid} | metin wake eşleşmedi | text="{_safe_preview(text)}"')
+                    continue
+            else:
+                _log_line("WAKE_AUDIO", f"{tid} | audio_wake=on (Wyoming/Porcupine) | transcript kontrolü opsiyonel")
 
             _log_line("HEARD", f"{text} | confidence: {conf:.2f}")
 
+            t_route0 = time.perf_counter()
             reply: str | None = route_intents(text)
             if reply is None:
-                if not tts.internet_available():
+                has_net = tts.internet_available()
+                _log_line("ROUTE", f"{tid} | intent=none | internet_available={has_net} | openai_key={'yes' if bool(config.OPENAI_API_KEY) else 'no'}")
+                if not has_net:
                     reply = memory.get_offline_response(text)
+                    _log_line("OFFLINE", f"{tid} | internet yok → offline_responses eşleşti mi? {'yes' if reply else 'no'}")
                 if reply is None:
                     if not config.OPENAI_API_KEY:
                         reply = memory.get_offline_response(text) or "Şu an bağlantı veya anahtar yok kanka."
+                        _log_line("ROUTE", f"{tid} | openai_key yok → offline/fallback seçildi")
                     else:
                         try:
                             _log_line("SENT_TO_LLM", text)
@@ -123,7 +167,13 @@ def run_loop() -> None:
                                 {"role": "system", "content": sys_prompt},
                                 {"role": "user", "content": text},
                             ]
+                            t_llm0 = time.perf_counter()
                             reply = llm.ask_openai(messages)
+                            t_llm1 = time.perf_counter()
+                            _log_line(
+                                "LLM_OK",
+                                f'{tid} | model={config.MODEL} | elapsed={_fmt_ms(t_llm1 - t_llm0)} | reply_preview="{_safe_preview(reply)}"',
+                            )
                         except Exception as e:
                             logger.warning("LLM hatası: %s", e)
                             reply = (
@@ -132,6 +182,12 @@ def run_loop() -> None:
                             )
                             if "limiti" in str(e).lower():
                                 reply = "Günlük konuşma limitine yaklaştık kanka."
+                            _log_line(
+                                "LLM_ERR",
+                                f"{tid} | {type(e).__name__}: {e} | fallback={'offline' if memory.get_offline_response(text) else 'generic'}",
+                            )
+            t_route1 = time.perf_counter()
+            _log_line("ROUTE_OK", f"{tid} | route_elapsed={_fmt_ms(t_route1 - t_route0)} | reply_len={len(reply or '')}")
 
             assert reply is not None
             _log_line("RESPONSE", reply)
@@ -139,13 +195,18 @@ def run_loop() -> None:
             memory.append_conversation_line("Kullanıcı", text)
             memory.append_conversation_line("Kanka", reply)
 
-            t0 = time.perf_counter()
             try:
+                t_tts0 = time.perf_counter()
                 kind, duration = tts.speak(reply, prefer_online=True)
             except Exception as e:
                 logger.warning("TTS hatası, Piper deneniyor: %s", e)
+                _log_line("TTS_ERR", f"{tid} | prefer_online failed: {type(e).__name__}: {e}")
                 kind, duration = tts.speak(reply, prefer_online=False)
-            _log_line("TTS", f"{kind} | duration: {duration:.1f}s | elapsed_since_heard: {time.perf_counter() - t0:.1f}s")
+            t_tts1 = time.perf_counter()
+            _log_line(
+                "TTS",
+                f"{tid} | {kind} | synth+play={duration:.1f}s | call_elapsed={_fmt_ms(t_tts1 - t_tts0)} | text_len={len(reply)}",
+            )
 
         except KeyboardInterrupt:
             logger.info("Kullanıcı durdurdu.")
