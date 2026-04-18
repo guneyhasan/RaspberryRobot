@@ -83,11 +83,16 @@ WHISPER_MODEL = _find_whisper_model(WHISPER_CPP_DIR)
 
 PIPER_BINARY = os.getenv("PIPER_BINARY", "piper")
 PIPER_MODEL_DIR = Path(os.getenv("PIPER_MODEL_DIR", str(MODELS_DIR / "tr_TR-ahmet-medium")))
+PIPER_MODEL_PATH = os.getenv("PIPER_MODEL_PATH", "").strip()
 
 SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
 VAD_THRESHOLD = float(os.getenv("VAD_THRESHOLD", "0.5"))
 SILENCE_END_SEC = float(os.getenv("SILENCE_END_SEC", "1.5"))
 MAX_UTTERANCE_SEC = float(os.getenv("MAX_UTTERANCE_SEC", "30"))
+
+# sounddevice (PortAudio) input device selection.
+# Example: AUDIO_INPUT_DEVICE="USB PnP Sound Device" or AUDIO_INPUT_DEVICE="2"
+AUDIO_INPUT_DEVICE = os.getenv("AUDIO_INPUT_DEVICE", "").strip()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 MODEL = os.getenv("MODEL", "gpt-4o-mini")

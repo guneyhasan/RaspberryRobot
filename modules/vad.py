@@ -81,11 +81,17 @@ def record_utterance(
             return float(model(t, sr).item())
 
     try:
+        device = None
+        if config.AUDIO_INPUT_DEVICE:
+            # sounddevice accepts index (int) or substring name (str)
+            device = int(config.AUDIO_INPUT_DEVICE) if config.AUDIO_INPUT_DEVICE.isdigit() else config.AUDIO_INPUT_DEVICE
+            logger.info("Mikrofon cihazı seçildi (AUDIO_INPUT_DEVICE=%r)", config.AUDIO_INPUT_DEVICE)
         with sd.InputStream(
             channels=1,
             samplerate=sr,
             dtype="int16",
             blocksize=chunk_samples,
+            device=device,
         ) as stream:
             while total < max_samples:
                 data, _ = stream.read(chunk_samples)

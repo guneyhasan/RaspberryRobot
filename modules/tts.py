@@ -72,6 +72,16 @@ def synthesize_openai_tts(text: str) -> bytes:
 
 def _find_piper_model() -> tuple[Path, Optional[Path]]:
     """Önce PIPER_MODEL_DIR, yoksa models/ kökünde düz .onnx (Rhasspy indirme düzeni)."""
+    if config.PIPER_MODEL_PATH:
+        p = Path(config.PIPER_MODEL_PATH).expanduser().resolve()
+        if not p.is_file():
+            raise FileNotFoundError(f"PIPER_MODEL_PATH dosyası bulunamadı: {p}")
+        json_path = p.with_suffix(".onnx.json")
+        if not json_path.is_file():
+            parent = p.parent
+            json_path = next(parent.glob("*.onnx.json"), None) or next(parent.glob("*.json"), None)
+        return p, json_path if json_path and json_path.is_file() else None
+
     dirs = [config.PIPER_MODEL_DIR, config.MODELS_DIR]
     seen: set[Path] = set()
     search_dirs = []
@@ -101,9 +111,16 @@ def _find_piper_model() -> tuple[Path, Optional[Path]]:
     return model, json_path if json_path and json_path.is_file() else None
 
 
-def synthesize_piper(text: str) -> bytes:
+def synthesize_piper_to_wav_file(text: str) -> Path:
+    """
+    Piper çıktısını bir WAV dosyasına yazar.
+    Not: Piper pipe kullanımında genelde `--output-raw` gerekir; burada `--output_file` ile
+    dosya üreterek oynatmayı stabil hale getiriyoruz.
+    """
     model, json_path = _find_piper_model()
-    cmd = [config.PIPER_BINARY, "--model", str(model)]
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        out = Path(f.name)
+    cmd = [config.PIPER_BINARY, "--model", str(model), "--output_file", str(out)]
     if json_path and json_path.is_file():
         cmd.extend(["--config", str(json_path)])
     r = subprocess.run(
@@ -113,9 +130,13 @@ def synthesize_piper(text: str) -> bytes:
         check=False,
     )
     if r.returncode != 0:
-        err = r.stderr.decode("utf-8", errors="replace")
+        err = (r.stderr or b"").decode("utf-8", errors="replace")
+        out.unlink(missing_ok=True)
         raise RuntimeError(f"Piper hatası: {err}")
-    return r.stdout
+    if not out.is_file() or out.stat().st_size < 100:
+        out.unlink(missing_ok=True)
+        raise RuntimeError("Piper WAV üretmedi (boş çıktı).")
+    return out
 
 
 def speak(text: str, prefer_online: bool = True) -> tuple[str, float]:
@@ -143,7 +164,10 @@ def speak(text: str, prefer_online: bool = True) -> tuple[str, float]:
             mp3.unlink(missing_ok=True)
             wav_path.unlink(missing_ok=True)
     else:
-        wav_bytes = synthesize_piper(text)
-        play_audio_wav_bytes(wav_bytes)
+        wav_path = synthesize_piper_to_wav_file(text)
+        try:
+            play_audio_file(wav_path)
+        finally:
+            wav_path.unlink(missing_ok=True)
     duration = time.perf_counter() - t0
     return used, duration
