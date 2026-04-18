@@ -140,9 +140,9 @@ def ask(messages: list[dict[str, Any]]) -> str:
                 completion = client.chat.completions.create(
                     model=config.GROQ_MODEL,
                     messages=messages,
-                    temperature=1,
+                    temperature=config.GROQ_TEMPERATURE,
                     max_completion_tokens=max(16, int(config.MAX_TOKENS)),
-                    top_p=1,
+                    top_p=config.GROQ_TOP_P,
                     stream=True,
                     stop=None,
                 )
@@ -156,9 +156,9 @@ def ask(messages: list[dict[str, Any]]) -> str:
             resp = client.chat.completions.create(
                 model=config.GROQ_MODEL,
                 messages=messages,
-                temperature=1,
+                temperature=config.GROQ_TEMPERATURE,
                 max_completion_tokens=max(16, int(config.MAX_TOKENS)),
-                top_p=1,
+                top_p=config.GROQ_TOP_P,
                 stream=False,
                 stop=None,
             )

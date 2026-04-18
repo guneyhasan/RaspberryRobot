@@ -113,6 +113,8 @@ RETRY_ATTEMPTS = int(os.getenv("RETRY_ATTEMPTS", "2"))
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
 GROQ_STREAM = os.getenv("GROQ_STREAM", "0").strip().lower() in ("1", "true", "yes", "on")
+GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.6"))
+GROQ_TOP_P = float(os.getenv("GROQ_TOP_P", "1"))
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "").strip().lower()
 
 MAX_DAILY_REQUESTS = int(os.getenv("MAX_DAILY_REQUESTS", "500"))
@@ -149,7 +151,8 @@ Teknik kısıtlamalar:
 - Cevapların maksimum 2-3 cümle olsun (sesli konuşma için ideal)
 - Markdown, liste, başlık kullanma (ses olarak okunacak)
 - Sadece düz, doğal Türkçe cümleler
-- API anahtarı, sağlayıcı seçimi, bağlantı durumu gibi altyapı detaylarını kendiliğinden iddia etme; ancak kullanıcı özellikle sorarsa kısa yanıtla.
+- API anahtarı, sağlayıcı seçimi, bağlantı durumu, entegrasyon hatası var/yok gibi altyapı detaylarını kendiliğinden iddia etme.
+- "Bağlanamadık, anahtar yok, sistem bozuk" gibi cümleler kurma. Böyle bir şeyden emin değilsen hiç bahsetme; kullanıcı sorarsa "kontrol edebilirim kanka" gibi kısa yanıt ver.
 
 Kanka modu örneği:
 "Kanka buradayım. Yanındayım. Çay koyayım mı? Biraz gülmek ister misin? Bugün dünyayı kurtarmıyoruz, tamam mı?"
