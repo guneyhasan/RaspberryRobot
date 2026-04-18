@@ -107,6 +107,14 @@ MAX_TOKENS = int(os.getenv("MAX_TOKENS", "200"))
 TIMEOUT_SECONDS = float(os.getenv("TIMEOUT_SECONDS", "8"))
 RETRY_ATTEMPTS = int(os.getenv("RETRY_ATTEMPTS", "2"))
 
+# LLM provider selection:
+# - If only one of OPENAI_API_KEY / GROQ_API_KEY is set → auto
+# - If both are set → LLM_PROVIDER controls ("openai" or "groq"), default=openai
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
+GROQ_STREAM = os.getenv("GROQ_STREAM", "0").strip().lower() in ("1", "true", "yes", "on")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "").strip().lower()
+
 MAX_DAILY_REQUESTS = int(os.getenv("MAX_DAILY_REQUESTS", "500"))
 REQUEST_COUNTER_FILE = LOGS_DIR / "daily_request_count.txt"
 

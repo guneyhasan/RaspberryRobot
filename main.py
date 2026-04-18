@@ -177,7 +177,7 @@ def run_loop() -> None:
                                 {"role": "user", "content": text},
                             ]
                             t_llm0 = time.perf_counter()
-                            reply = llm.ask_openai(messages)
+                            reply = llm.ask(messages)
                             t_llm1 = time.perf_counter()
                             _log_line(
                                 "LLM_OK",
