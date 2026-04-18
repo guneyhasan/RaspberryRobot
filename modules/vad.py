@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 from typing import Optional
 
 import numpy as np
@@ -80,7 +81,83 @@ def record_utterance(
         with torch.no_grad():
             return float(model(t, sr).item())
 
+    def read_with_arecord() -> Optional[np.ndarray]:
+        """
+        ALSA cihazından `arecord` ile ham PCM (S16_LE) okuyup VAD ile segment çıkarır.
+        sounddevice yanlış cihaz seçtiğinde en güvenilir yöntem.
+        """
+        dev = config.AUDIO_INPUT_ALSA_DEVICE
+        if not dev:
+            return None
+
+        bytes_per_chunk = int(chunk_samples * 2)  # S16_LE mono
+        cmd = [
+            "arecord",
+            "-q",
+            "-D",
+            dev,
+            "-r",
+            str(sr),
+            "-f",
+            "S16_LE",
+            "-c",
+            "1",
+            "-t",
+            "raw",
+        ]
+        logger.info("VAD kayıt backend=arecord device=%s sr=%s", dev, sr)
+
+        audio_parts: list[np.ndarray] = []
+        silence_run = 0
+        speaking = False
+        total = 0
+
+        p: subprocess.Popen[bytes] | None = None
+        try:
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            assert p.stdout is not None
+
+            while total < max_samples:
+                b = p.stdout.read(bytes_per_chunk)
+                if not b or len(b) < bytes_per_chunk:
+                    break
+                mono = np.frombuffer(b, dtype=np.int16).copy()
+                total += len(mono)
+
+                prob = vad_prob(mono)
+                is_speech = prob >= thr
+
+                if is_speech:
+                    speaking = True
+                    silence_run = 0
+                    audio_parts.append(mono)
+                elif speaking:
+                    audio_parts.append(mono)
+                    silence_run += len(mono)
+                    if silence_run >= silence_samples:
+                        break
+        except Exception as e:
+            logger.exception("arecord/VAD hatası: %s", e)
+            return None
+        finally:
+            if p is not None:
+                try:
+                    p.terminate()
+                except Exception:
+                    pass
+                try:
+                    p.wait(timeout=1)
+                except Exception:
+                    pass
+
+        if not audio_parts:
+            return None
+        return np.concatenate(audio_parts, axis=0)
+
     try:
+        if config.AUDIO_INPUT_ALSA_DEVICE:
+            return read_with_arecord()
+
         device = None
         if config.AUDIO_INPUT_DEVICE:
             # sounddevice accepts index (int) or substring name (str)

@@ -94,6 +94,10 @@ MAX_UTTERANCE_SEC = float(os.getenv("MAX_UTTERANCE_SEC", "30"))
 # Example: AUDIO_INPUT_DEVICE="USB PnP Sound Device" or AUDIO_INPUT_DEVICE="2"
 AUDIO_INPUT_DEVICE = os.getenv("AUDIO_INPUT_DEVICE", "").strip()
 
+# ALSA input device override (arecord -D). Example: "plughw:3,0"
+# If set, VAD will read audio via `arecord` instead of PortAudio/sounddevice.
+AUDIO_INPUT_ALSA_DEVICE = os.getenv("AUDIO_INPUT_ALSA_DEVICE", "").strip()
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 MODEL = os.getenv("MODEL", "gpt-4o-mini")
 VISION_MODEL = os.getenv("VISION_MODEL", "gpt-4o")
