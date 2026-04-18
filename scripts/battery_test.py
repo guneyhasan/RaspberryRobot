@@ -23,7 +23,22 @@ from modules import battery  # noqa: E402
 def print_once() -> int:
     r = battery.read_battery()
     if r is None:
-        print("Pil okunamadı (robot_hat utils get_battery_voltage çalışmıyor olabilir).")
+        print("Pil okunamadı.")
+        print("")
+        print("Hızlı teşhis:")
+        print("- venv içindeyseniz `robot_hat` paketi bu venv'de kurulu olmayabilir.")
+        print("- SunFounder robot-hat'ı `sudo python3 setup.py install` ile kurduysanız,")
+        print("  bu genelde sistem site-packages'e kurulur ve venv bunu görmeyebilir.")
+        print("")
+        print("Çözüm seçenekleri:")
+        print("1) Venv'i sistem paketlerini görecek şekilde oluşturun:")
+        print("   python3 -m venv --system-site-packages venv")
+        print("")
+        print("2) Robot-HAT'ı venv'e kurun (önerilen):")
+        print("   pip install 'git+https://github.com/sunfounder/robot-hat.git'")
+        print("")
+        print("Debug için:")
+        print("   python3 scripts/battery_test.py --debug")
         return 2
     print(f"voltage={r.voltage:.2f}V percent={r.percent}%")
     return 0
@@ -33,7 +48,26 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--watch", action="store_true", help="Sürekli ölç (Ctrl+C ile çık)")
     p.add_argument("--interval", type=float, default=10.0, help="Watch aralığı (saniye)")
+    p.add_argument("--debug", action="store_true", help="robot_hat import/attribute debug yazdır")
     args = p.parse_args()
+
+    if args.debug:
+        try:
+            import robot_hat  # type: ignore
+
+            print(f"robot_hat imported: {robot_hat!r}")
+            try:
+                from robot_hat import utils  # type: ignore
+
+                print(f"robot_hat.utils imported: {utils!r}")
+                print("has utils.get_battery_voltage:", hasattr(utils, "get_battery_voltage"))
+                if hasattr(utils, "get_battery_voltage"):
+                    print("utils.get_battery_voltage() ->", utils.get_battery_voltage())
+            except Exception as e:
+                print("robot_hat.utils import/call failed:", type(e).__name__, e)
+        except Exception as e:
+            print("robot_hat import failed:", type(e).__name__, e)
+        print("")
 
     if not args.watch:
         return print_once()
