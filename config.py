@@ -80,6 +80,7 @@ def _find_whisper_model(base: Path) -> Path:
 
 WHISPER_BINARY = _find_whisper_binary(WHISPER_CPP_DIR)
 WHISPER_MODEL = _find_whisper_model(WHISPER_CPP_DIR)
+WHISPER_THREADS = int(os.getenv("WHISPER_THREADS", "4"))
 
 PIPER_BINARY = os.getenv("PIPER_BINARY", "piper")
 PIPER_MODEL_DIR = Path(os.getenv("PIPER_MODEL_DIR", str(MODELS_DIR / "tr_TR-ahmet-medium")))

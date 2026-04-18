@@ -40,6 +40,8 @@ def transcribe_pcm(pcm_int16: np.ndarray, sample_rate: int | None = None) -> tup
             "-l",
             "tr",
             "-nt",
+            "-t",
+            str(config.WHISPER_THREADS),
         ]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if r.returncode != 0:
