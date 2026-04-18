@@ -119,10 +119,13 @@ DRIVE_MOTOR_LEFT = int(os.getenv("DRIVE_MOTOR_LEFT", "1"))
 DRIVE_MOTOR_RIGHT = int(os.getenv("DRIVE_MOTOR_RIGHT", "2"))
 # Bazı robot_hat sürümlerinde Motor(pwm, dir) imzası var. O durumda pin/portları doldurun.
 # Örnek formatlar sürüme göre değişebilir: "P12", "P13" veya BCM numarası gibi.
-DRIVE_LEFT_PWM = os.getenv("DRIVE_LEFT_PWM", "").strip()
-DRIVE_LEFT_DIR = os.getenv("DRIVE_LEFT_DIR", "").strip()
-DRIVE_RIGHT_PWM = os.getenv("DRIVE_RIGHT_PWM", "").strip()
-DRIVE_RIGHT_DIR = os.getenv("DRIVE_RIGHT_DIR", "").strip()
+# PiCar-X (SunFounder) için yaygın varsayılanlar (picar-x v2.0 kaynaklarına göre):
+# - Sol arka:  DIR=D4, PWM=P13
+# - Sağ arka: DIR=D5, PWM=P12
+DRIVE_LEFT_PWM = os.getenv("DRIVE_LEFT_PWM", "P13").strip()
+DRIVE_LEFT_DIR = os.getenv("DRIVE_LEFT_DIR", "D4").strip()
+DRIVE_RIGHT_PWM = os.getenv("DRIVE_RIGHT_PWM", "P12").strip()
+DRIVE_RIGHT_DIR = os.getenv("DRIVE_RIGHT_DIR", "D5").strip()
 STEERING_SERVO_PORT = os.getenv("STEERING_SERVO_PORT", "P0").strip()  # ör: P0..P11
 STEERING_CENTER_DEG = float(os.getenv("STEERING_CENTER_DEG", "0"))
 STEERING_MIN_DEG = float(os.getenv("STEERING_MIN_DEG", "-35"))

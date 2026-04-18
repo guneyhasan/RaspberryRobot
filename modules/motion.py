@@ -141,7 +141,11 @@ def _init_if_needed() -> None:
 
         backend_errs: list[str] = []
         _drive = None
-        for ctor in (_MotorsBackend, _WheelBackend, _PinBackend):
+        # Öncelik:
+        # - PiCar-X'te en deterministik yol: Motor(pwm, dir) (config'te varsayılan pinler var)
+        # - Motors() bazı kurulumlarda /opt/robot_hat yazma izni ister → PermissionError
+        # - Wheel backend yalnızca Motor() destekleyen sürümlerde çalışır
+        for ctor in (_PinBackend, _MotorsBackend, _WheelBackend):
             try:
                 _drive = ctor()
                 break
