@@ -58,6 +58,11 @@ def _safe_preview(text: str, limit: int = 220) -> str:
     return t[: limit - 1] + "…"
 
 
+def _has_any_phrase(text: str, phrases: tuple[str, ...]) -> bool:
+    low = (text or "").lower()
+    return any(p in low for p in phrases) if phrases else False
+
+
 def route_intents(text: str) -> str | None:
     mem_reply = memory.try_handle_memory_command(text)
     if mem_reply is not None:
@@ -122,10 +127,14 @@ def run_loop() -> None:
         logger.warning("Açılış anonsu atlandı: %s", e)
 
     seq = 0
+    conversation_mode = False
     while True:
         seq += 1
         tid = _trace_id(seq)
-        _log_line("LOOP", f"{tid} | dinleme başladı (VAD → wake → STT → route → TTS)")
+        _log_line(
+            "LOOP",
+            f"{tid} | dinleme başladı (VAD → wake → STT → route → TTS) | conversation_mode={'on' if conversation_mode else 'off'}",
+        )
         try:
             t_listen0 = time.perf_counter()
             try:
@@ -143,16 +152,48 @@ def run_loop() -> None:
                 "STT",
                 f'{tid} | text="{_safe_preview(text)}" | confidence={conf:.2f} | total={_fmt_ms(t_listen1 - t_listen0)}',
             )
-            if not wake_word.audio_wake_enabled() and config.REQUIRE_WAKE_PHRASE:
-                ok_transcript = wake_word.transcript_has_wake_phrase(text)
-                _log_line("WAKE_TXT", f"{tid} | audio_wake=off | transcript_match={ok_transcript}")
-                if not ok_transcript:
-                    _log_line("SKIP", f'{tid} | metin wake eşleşmedi | text="{_safe_preview(text)}"')
-                    continue
-            elif not wake_word.audio_wake_enabled() and not config.REQUIRE_WAKE_PHRASE:
-                _log_line("WAKE_TXT", f"{tid} | audio_wake=off | require_wake_phrase=off | transcript_check=skipped")
+
+            # Konuşma modu: "hey kanka" ile aç, "görüşürüz kanka" ile kapat.
+            if not conversation_mode and _has_any_phrase(text, config.CONVERSATION_ACTIVATE_PHRASES):
+                conversation_mode = True
+                _log_line("MODE", f"{tid} | conversation_mode=on | trigger=activate")
+                reply = "Buradayım kanka. Dinliyorum."
+                _log_line("RESPONSE", reply)
+                try:
+                    kind, duration = tts.speak(reply, prefer_online=True)
+                except Exception as e:
+                    _log_line("TTS_ERR", f"{tid} | prefer_online failed: {type(e).__name__}: {e}")
+                    kind, duration = tts.speak(reply, prefer_online=False)
+                _log_line("TTS", f"{tid} | {kind} | synth+play={duration:.1f}s | text_len={len(reply)}")
+                continue
+
+            if conversation_mode and _has_any_phrase(text, config.CONVERSATION_DEACTIVATE_PHRASES):
+                conversation_mode = False
+                _log_line("MODE", f"{tid} | conversation_mode=off | trigger=deactivate")
+                reply = "Görüşürüz kanka."
+                _log_line("RESPONSE", reply)
+                try:
+                    kind, duration = tts.speak(reply, prefer_online=True)
+                except Exception as e:
+                    _log_line("TTS_ERR", f"{tid} | prefer_online failed: {type(e).__name__}: {e}")
+                    kind, duration = tts.speak(reply, prefer_online=False)
+                _log_line("TTS", f"{tid} | {kind} | synth+play={duration:.1f}s | text_len={len(reply)}")
+                continue
+
+            # Konuşma modu kapalıysa wake zorunluluğu uygula; mod açıksa direkt devam et.
+            if not conversation_mode:
+                if not wake_word.audio_wake_enabled() and config.REQUIRE_WAKE_PHRASE:
+                    ok_transcript = wake_word.transcript_has_wake_phrase(text)
+                    _log_line("WAKE_TXT", f"{tid} | audio_wake=off | transcript_match={ok_transcript}")
+                    if not ok_transcript:
+                        _log_line("SKIP", f'{tid} | metin wake eşleşmedi | text="{_safe_preview(text)}"')
+                        continue
+                elif not wake_word.audio_wake_enabled() and not config.REQUIRE_WAKE_PHRASE:
+                    _log_line("WAKE_TXT", f"{tid} | audio_wake=off | require_wake_phrase=off | transcript_check=skipped")
+                else:
+                    _log_line("WAKE_AUDIO", f"{tid} | audio_wake=on (Wyoming/Porcupine) | transcript kontrolü opsiyonel")
             else:
-                _log_line("WAKE_AUDIO", f"{tid} | audio_wake=on (Wyoming/Porcupine) | transcript kontrolü opsiyonel")
+                _log_line("MODE", f"{tid} | conversation_mode=on | wake_check=skipped")
 
             _log_line("HEARD", f"{text} | confidence: {conf:.2f}")
 

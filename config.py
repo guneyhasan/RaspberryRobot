@@ -135,6 +135,18 @@ WYOMING_OPENWAKEWORD_URI = os.getenv("WYOMING_OPENWAKEWORD_URI", "").strip()
 # REQUIRE_WAKE_PHRASE=0 → "kanka" demeden de cevap verir.
 REQUIRE_WAKE_PHRASE = os.getenv("REQUIRE_WAKE_PHRASE", "1").strip().lower() not in ("0", "false", "no", "off")
 
+# Konuşma modu: "hey kanka" ile aç, "görüşürüz kanka" ile kapat.
+CONVERSATION_ACTIVATE_PHRASES = tuple(
+    p.strip().lower()
+    for p in os.getenv("CONVERSATION_ACTIVATE_PHRASES", "hey kanka").split(",")
+    if p.strip()
+)
+CONVERSATION_DEACTIVATE_PHRASES = tuple(
+    p.strip().lower()
+    for p in os.getenv("CONVERSATION_DEACTIVATE_PHRASES", "görüşürüz kanka,gorusuruz kanka").split(",")
+    if p.strip()
+)
+
 BASE_SYSTEM_PROMPT = """Sen "Kanka" adlı bir yapay zeka robottasın. Fiziksel varlığın var: tekerlekli bir robot gövdesi, iki kamera gözün ve sesle iletişim kuruyorsun.
 
 Kullanıcın: Cihan
