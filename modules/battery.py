@@ -10,6 +10,9 @@ import config
 
 logger = logging.getLogger(__name__)
 
+_last_reading: Optional[BatteryReading] = None
+_last_ts: float = 0.0
+
 
 @dataclass(frozen=True)
 class BatteryReading:
@@ -56,7 +59,23 @@ def read_battery() -> Optional[BatteryReading]:
     v = read_voltage()
     if v is None:
         return None
-    return BatteryReading(voltage=v, percent=voltage_to_percent(v))
+    r = BatteryReading(voltage=v, percent=voltage_to_percent(v))
+    global _last_reading, _last_ts
+    _last_reading = r
+    _last_ts = time.time()
+    return r
+
+
+def get_cached_reading(max_age_sec: float = 60.0) -> Optional[BatteryReading]:
+    """
+    Monitor thread'i çalışıyorsa en son okunan değeri döndürür.
+    Çok eskiyse (max_age_sec) None döndürür.
+    """
+    if _last_reading is None:
+        return None
+    if (time.time() - _last_ts) > max_age_sec:
+        return None
+    return _last_reading
 
 
 def monitor_loop(

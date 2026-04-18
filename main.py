@@ -86,6 +86,29 @@ def route_intents(text: str) -> str | None:
 
     low = text.lower().strip()
 
+    # Pil durumu soruları (LLM'e gitmeden direkt yanıt)
+    battery_triggers = (
+        "pilin kaç",
+        "pil kac",
+        "pil yüzde",
+        "pil yuzde",
+        "şarjın kaç",
+        "sarjin kac",
+        "şarj kaç",
+        "sarj kac",
+        "şarjım kaç",
+        "sarjim kac",
+        "şarjım ne kadar",
+        "sarjim ne kadar",
+        "ne kadar şarjın kaldı",
+        "ne kadar sarjin kaldi",
+    )
+    if any(t in low for t in battery_triggers):
+        r = battery.get_cached_reading(max_age_sec=120.0) or battery.read_battery()
+        if r is None:
+            return "Şu an pil seviyesini okuyamadım kanka."
+        return f"Kanka şarjım yüzde {r.percent}. Voltajım da {r.voltage:.2f} volt."
+
     if any(
         p in low
         for p in (
