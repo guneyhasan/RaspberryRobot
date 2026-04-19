@@ -55,7 +55,7 @@ def _wait_server_ready(timeout_sec: float) -> bool:
     deadline = time.monotonic() + timeout_sec
     health = urljoin(_server_base() + "/", "health")
     while time.monotonic() < deadline:
-        j = _http_get_json(health, timeout_sec=min(5.0, max(0.5, deadline - time.monotonic())))
+        j = _http_get_json(health, timeout=min(5.0, max(0.5, deadline - time.monotonic())))
         if j and j.get("status") == "ok":
             return True
         time.sleep(0.15)

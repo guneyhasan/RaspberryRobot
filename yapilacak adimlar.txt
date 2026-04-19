@@ -60,3 +60,9 @@ sudo udevadm control --reload-rules
 sudo udevadm trigger
 
 sudo reboot
+
+
+
+bash scripts/build_whisper.sh
+
+
