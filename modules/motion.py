@@ -83,7 +83,7 @@ def _init_if_needed() -> None:
 
                 from robot_hat import Motors  # type: ignore
 
-                self._motors = Motors()
+                self._motors = Motors(db=str(getattr(config, "MOTORS_DB_PATH", "/tmp/robot_hat_motors.config")))
                 self._l = int(getattr(config, "DRIVE_MOTOR_LEFT", 1))
                 self._r = int(getattr(config, "DRIVE_MOTOR_RIGHT", 2))
 

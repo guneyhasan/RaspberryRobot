@@ -28,6 +28,10 @@ pkill -f aplay 2>/dev/null || true
 
 speaker-test -D hb -c 2 -t sine
 
+echo "Merhaba, ses sunucusunu geçici olarak devre dışı bıraktım." | piper --model ~/RaspberryRobot/models/tr_TR-dfki-medium.onnx --output-raw | pasuspender -- aplay -D plughw:2,0 -r 22050 -f S16_LE -t raw
+
+echo "Merhaba, ses sunucusunu geçici olarak devre dışı bıraktım." | piper --model ~/RaspberryRobot/models/tr_TR-dfki-medium.onnx --output-raw | aplay -D plughw:2,0 -r 22050 -f S16_LE -t raw
+
 
 piper model
 cd ~/RaspberryRobot/models
@@ -42,3 +46,17 @@ cd ~
 wget https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_arm64.tar.gz
 tar -xf piper_arm64.tar.gz
 sudo ln -s ~/piper/piper /usr/local/bin/piper
+
+
+sudo usermod -aG gpio,i2c,spi rblocal3
+
+sudo tee /etc/udev/rules.d/99-robot-gpio.rules >/dev/null <<'EOF'
+KERNEL=="gpiomem", GROUP="gpio", MODE="0660"
+SUBSYSTEM=="gpio", KERNEL=="gpiochip*", GROUP="gpio", MODE="0660"
+SUBSYSTEM=="pwm",  KERNEL=="pwmchip*", GROUP="gpio", MODE="0660"
+EOF
+
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+
+sudo reboot

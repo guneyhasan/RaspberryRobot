@@ -90,7 +90,8 @@ fi
 if [[ -d "$ROOT/whisper.cpp" ]] && [[ ! -f "$ROOT/whisper.cpp/main" ]] && [[ ! -f "$ROOT/whisper.cpp/build/bin/whisper-cli" ]]; then
   echo "[install] whisper.cpp derleniyor (CMake veya make)..."
   (cd "$ROOT/whisper.cpp" && \
-    { cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j4; } || \
+    { cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j4 && \
+      cmake --build build -j4 --target whisper-server 2>/dev/null || true; } || \
     { make -j4; })
 fi
 if [[ -d "$ROOT/whisper.cpp/models" ]] && [[ ! -f "$ROOT/whisper.cpp/models/ggml-small.bin" ]]; then

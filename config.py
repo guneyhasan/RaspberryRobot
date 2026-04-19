@@ -90,6 +90,68 @@ WHISPER_BINARY = _find_whisper_binary(WHISPER_CPP_DIR)
 WHISPER_MODEL = _find_whisper_model(WHISPER_CPP_DIR)
 WHISPER_THREADS = int(os.getenv("WHISPER_THREADS", "4"))
 
+
+def _find_whisper_server_binary(base: Path) -> Path:
+    """Kalıcı model için `whisper-server` (examples/server)."""
+    env = os.getenv("WHISPER_SERVER_BINARY", "").strip()
+    if env:
+        p = Path(env).expanduser().resolve()
+        if p.is_file():
+            return p
+    for rel in (
+        "build/bin/whisper-server",
+        "build/bin/server",
+    ):
+        c = (base / rel).resolve()
+        if c.is_file():
+            return c
+    bdir = base / "build"
+    if bdir.is_dir():
+        for p in bdir.rglob("whisper-server"):
+            if p.is_file():
+                try:
+                    if p.stat().st_size < 30_000:
+                        continue
+                except OSError:
+                    continue
+                return p.resolve()
+    return (base / "build" / "bin" / "whisper-server").resolve()
+
+
+WHISPER_SERVER_BINARY = _find_whisper_server_binary(WHISPER_CPP_DIR)
+
+
+def _env_bool(key: str, default: bool) -> bool:
+    v = os.getenv(key)
+    if v is None:
+        return default
+    s = v.strip().lower()
+    if s in ("1", "true", "yes", "on"):
+        return True
+    if s in ("0", "false", "no", "off", ""):
+        return False
+    return default
+
+
+def _default_whisper_stt_backend() -> str:
+    """server: model bellekte kalır (whisper-server). cli: her seferinde whisper-cli."""
+    explicit = os.getenv("WHISPER_STT_BACKEND", "").strip().lower()
+    if explicit in ("server", "cli"):
+        return explicit
+    return "server" if WHISPER_SERVER_BINARY.is_file() else "cli"
+
+
+WHISPER_STT_BACKEND = _default_whisper_stt_backend()
+WHISPER_SERVER_SPAWN = _env_bool("WHISPER_SERVER_SPAWN", True)
+WHISPER_SERVER_HOST = _env_str("WHISPER_SERVER_HOST", "127.0.0.1")
+WHISPER_SERVER_PORT = int(os.getenv("WHISPER_SERVER_PORT", "8777"))
+WHISPER_SERVER_START_TIMEOUT_SEC = float(os.getenv("WHISPER_SERVER_START_TIMEOUT_SEC", "180"))
+WHISPER_SERVER_INFER_TIMEOUT_SEC = float(os.getenv("WHISPER_SERVER_INFER_TIMEOUT_SEC", "120"))
+WHISPER_SERVER_BASE_URL = _env_str(
+    "WHISPER_SERVER_BASE_URL",
+    f"http://{WHISPER_SERVER_HOST}:{WHISPER_SERVER_PORT}",
+).rstrip("/")
+
 PIPER_BINARY = _env_str("PIPER_BINARY", "piper")
 PIPER_MODEL_DIR = Path(_env_str("PIPER_MODEL_DIR", str(MODELS_DIR / "tr_TR-ahmet-medium")))
 PIPER_MODEL_PATH = _env_str("PIPER_MODEL_PATH", "")
@@ -134,6 +196,8 @@ DRIVE_LEFT_PWM = _env_str("DRIVE_LEFT_PWM", "P13")
 DRIVE_LEFT_DIR = _env_str("DRIVE_LEFT_DIR", "D4")
 DRIVE_RIGHT_PWM = _env_str("DRIVE_RIGHT_PWM", "P12")
 DRIVE_RIGHT_DIR = _env_str("DRIVE_RIGHT_DIR", "D5")
+# Motors() config dosyası (/opt yerine yazılabilir yer)
+MOTORS_DB_PATH = _env_str("MOTORS_DB_PATH", str(DATA_DIR / "robot_hat_motors.config"))
 # PiCar-X v2.0'da tipik servo kanalları:
 # - P0: kamera pan, P1: kamera tilt, P2: direksiyon
 STEERING_SERVO_PORT = _env_str("STEERING_SERVO_PORT", "P2")  # ör: P0..P11

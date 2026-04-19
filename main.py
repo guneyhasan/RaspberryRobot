@@ -249,6 +249,18 @@ def run_loop() -> None:
         ", ".join(config.CONVERSATION_ACTIVATE_PHRASES) if config.CONVERSATION_ACTIVATE_PHRASES else "(boş)",
         ", ".join(config.CONVERSATION_DEACTIVATE_PHRASES) if config.CONVERSATION_DEACTIVATE_PHRASES else "(boş)",
     )
+    logger.info(
+        "STT: backend=%s | server_spawn=%s | base_url=%s",
+        getattr(config, "WHISPER_STT_BACKEND", "cli"),
+        getattr(config, "WHISPER_SERVER_SPAWN", True),
+        getattr(config, "WHISPER_SERVER_BASE_URL", ""),
+    )
+    try:
+        stt.ensure_whisper_backend_ready()
+        logger.info("STT: arka uç hazır (model ilk yükleme tamamlandıysa sonraki transkripsiyonlar hızlı olur).")
+    except Exception as e:
+        logger.exception("STT arka uç hazırlığı başarısız: %s", e)
+        raise
 
     try:
         tts.speak(config.STARTUP_PHRASE, prefer_online=False)

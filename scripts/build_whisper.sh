@@ -28,6 +28,12 @@ cd "$WSP"
 echo "[build_whisper] CMake derlemesi..."
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j"$(nproc 2>/dev/null || echo 4)"
+# Kalıcı STT: model bir kez yüklenir (Python her istekte whisper-cli çağırmaz).
+if cmake --build build -j"$(nproc 2>/dev/null || echo 4)" --target whisper-server 2>/dev/null; then
+  echo "[build_whisper] whisper-server hedefi derlendi."
+else
+  echo "[build_whisper] UYARI: whisper-server hedefi yok veya derlenemedi (eski whisper.cpp?). Tam derleme zaten denendi."
+fi
 
 if [[ -x build/bin/whisper-cli ]]; then
   echo "[build_whisper] İkili: $WSP/build/bin/whisper-cli"
@@ -54,6 +60,6 @@ cd "$ROOT"
 export PYTHONPATH="$ROOT"
 PY="$ROOT/venv/bin/python3"
 [[ -x "$PY" ]] || PY="python3"
-"$PY" -c "import config; print('WHISPER_BINARY=', config.WHISPER_BINARY, 'exists=', config.WHISPER_BINARY.is_file()); print('WHISPER_MODEL =', config.WHISPER_MODEL, 'exists=', config.WHISPER_MODEL.is_file())"
+"$PY" -c "import config; print('WHISPER_BINARY=', config.WHISPER_BINARY, 'exists=', config.WHISPER_BINARY.is_file()); print('WHISPER_SERVER_BINARY=', getattr(config,'WHISPER_SERVER_BINARY',None), 'exists=', getattr(config,'WHISPER_SERVER_BINARY',None) and config.WHISPER_SERVER_BINARY.is_file()); print('WHISPER_STT_BACKEND=', getattr(config,'WHISPER_STT_BACKEND',None)); print('WHISPER_MODEL =', config.WHISPER_MODEL, 'exists=', config.WHISPER_MODEL.is_file())"
 
 echo "[build_whisper] Bitti."
