@@ -113,6 +113,7 @@ def record_utterance(
         speaking = False
         total = 0
         t0 = time.perf_counter()
+        t_first_speech: float | None = None
 
         p: subprocess.Popen[bytes] | None = None
         try:
@@ -130,6 +131,8 @@ def record_utterance(
                 is_speech = prob >= thr
 
                 if is_speech:
+                    if not speaking:
+                        t_first_speech = time.perf_counter()
                     speaking = True
                     silence_run = 0
                     audio_parts.append(mono)
@@ -157,9 +160,11 @@ def record_utterance(
             logger.info("VAD(arecord): konuşma yok (elapsed=%0.1fs, total_samples=%s)", t1 - t0, total)
             return None
         out = np.concatenate(audio_parts, axis=0)
+        lead = (t_first_speech - t0) if t_first_speech is not None else -1.0
         logger.info(
-            "VAD(arecord): segment çıktı (elapsed=%0.1fs, total_samples=%s, out_samples=%s, out_sec=%0.2f)",
+            "VAD(arecord): segment çıktı (elapsed=%0.1fs, lead_to_speech=%0.2fs, total_samples=%s, out_samples=%s, out_sec=%0.2f)",
             t1 - t0,
+            lead,
             total,
             len(out),
             len(out) / float(sr),
@@ -184,6 +189,7 @@ def record_utterance(
             device=device,
         ) as stream:
             t0 = time.perf_counter()
+            t_first_speech: float | None = None
             while total < max_samples:
                 data, _ = stream.read(chunk_samples)
                 mono = data[:, 0].copy()
@@ -193,6 +199,8 @@ def record_utterance(
                 is_speech = prob >= thr
 
                 if is_speech:
+                    if not speaking:
+                        t_first_speech = time.perf_counter()
                     speaking = True
                     silence_run = 0
                     audio_parts.append(mono)
@@ -210,9 +218,11 @@ def record_utterance(
         logger.info("VAD(sounddevice): konuşma yok (elapsed=%0.1fs, total_samples=%s)", t1 - t0, total)
         return None
     out = np.concatenate(audio_parts, axis=0)
+    lead = (t_first_speech - t0) if t_first_speech is not None else -1.0
     logger.info(
-        "VAD(sounddevice): segment çıktı (elapsed=%0.1fs, total_samples=%s, out_samples=%s, out_sec=%0.2f)",
+        "VAD(sounddevice): segment çıktı (elapsed=%0.1fs, lead_to_speech=%0.2fs, total_samples=%s, out_samples=%s, out_sec=%0.2f)",
         t1 - t0,
+        lead,
         total,
         len(out),
         len(out) / float(sr),
