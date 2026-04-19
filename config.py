@@ -152,6 +152,9 @@ WHISPER_SERVER_BASE_URL = _env_str(
     f"http://{WHISPER_SERVER_HOST}:{WHISPER_SERVER_PORT}",
 ).rstrip("/")
 
+# Sunucu + HTTP inference: düşük gecikme (robot); kapatırsanız whisper varsayılanları (daha ağır).
+WHISPER_FAST_DECODE = _env_bool("WHISPER_FAST_DECODE", True)
+
 PIPER_BINARY = _env_str("PIPER_BINARY", "piper")
 PIPER_MODEL_DIR = Path(_env_str("PIPER_MODEL_DIR", str(MODELS_DIR / "tr_TR-ahmet-medium")))
 PIPER_MODEL_PATH = _env_str("PIPER_MODEL_PATH", "")

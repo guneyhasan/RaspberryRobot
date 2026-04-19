@@ -76,7 +76,22 @@ def _multipart_infer(wav_bytes: bytes, infer_url: str, timeout: float) -> tuple[
     parts.append(b'Content-Disposition: form-data; name="file"; filename="t.wav"' + crlf)
     parts.append(b"Content-Type: audio/wav" + crlf + crlf)
     parts.append(wav_bytes + crlf)
-    for name, val in (("language", "tr"), ("response_format", "json"), ("no_timestamps", "true")):
+    fields = [
+        ("language", "tr"),
+        ("response_format", "json"),
+        ("no_timestamps", "true"),
+    ]
+    if getattr(config, "WHISPER_FAST_DECODE", True):
+        fields.extend(
+            [
+                ("temperature", "0.0"),
+                ("temperature_inc", "0.2"),
+                ("best_of", "1"),
+                ("beam_size", "1"),
+                ("no_context", "true"),
+            ]
+        )
+    for name, val in fields:
         parts.append(f"--{boundary}".encode() + crlf)
         parts.append(f'Content-Disposition: form-data; name="{name}"'.encode() + crlf + crlf)
         parts.append(val.encode("utf-8") + crlf)
@@ -129,6 +144,7 @@ def main() -> int:
     print(f"  WHISPER_MODEL           = {config.WHISPER_MODEL}")
     print(f"    exists = {config.WHISPER_MODEL.is_file()}")
     print(f"  WHISPER_THREADS         = {config.WHISPER_THREADS}")
+    print(f"  WHISPER_FAST_DECODE      = {getattr(config, 'WHISPER_FAST_DECODE', True)}")
     print()
 
     host = getattr(config, "WHISPER_SERVER_HOST", "127.0.0.1")
@@ -209,10 +225,10 @@ def main() -> int:
     print()
 
     print("=== yorum ===")
-    print("  - ensure süresi çok uzunsa: model ilk yükleme (normal, bir kez).")
-    print("  - transcribe #1 >> #2 ise: hâlâ cli veya her seferinde yeni süreç olabilir; backend ve logları kontrol edin.")
-    print("  - HTTP inference ile transcribe_pcm süreleri yakınsa: darboğaz whisper hesabı / ses uzunluğu.")
-    print("  - HTTP çok hızlı, transcribe_pcm yavaşsa: WAV yazımı veya kilit beklemesi (nadiren).")
+    print("  - ensure ~0.3–3s: model bir kez RAM’e; sonrasında health ok = sunucu hazır.")
+    print("  - transcribe #1 ≈ #2 ≈ … ise model tekrar yüklenmiyor (iyi); kalan süre = ses uzunluğu × model (small ~1–2× realtime Pi’de sık görülür).")
+    print("  - ~1 sn hedef: daha kısa cümle (VAD/silence), ggml-tiny/base veya quantize (q5_0), WHISPER_THREADS çekirdek sayısına göre artırılabilir.")
+    print("  - WHISPER_FAST_DECODE=1 (varsayılan): beam/best-of düşük, daha hızlı decode (kalite biraz düşebilir).")
     return 0
 
 

@@ -99,6 +99,9 @@ def _start_managed_server_locked() -> None:
         "--port",
         str(config.WHISPER_SERVER_PORT),
     ]
+    if getattr(config, "WHISPER_FAST_DECODE", True):
+        # Açılış varsayılanları da hafif olsun; her istekte multipart ile tekrar gönderilir.
+        cmd.extend(["-bo", "1", "-bs", "1", "-nf"])
     logger.info("STT: whisper-server başlatılıyor: %s", " ".join(cmd))
     _server_proc = subprocess.Popen(
         cmd,
@@ -179,6 +182,12 @@ def _multipart_inference_body(wav_bytes: bytes) -> tuple[bytes, str]:
     add_field("language", "tr")
     add_field("response_format", "json")
     add_field("no_timestamps", "true")
+    if getattr(config, "WHISPER_FAST_DECODE", True):
+        add_field("temperature", "0.0")
+        add_field("temperature_inc", "0.2")
+        add_field("best_of", "1")
+        add_field("beam_size", "1")
+        add_field("no_context", "true")
     parts.append(f"--{boundary}--".encode() + crlf)
     body = b"".join(parts)
     ctype = f"multipart/form-data; boundary={boundary}"
@@ -246,6 +255,8 @@ def transcribe_pcm_cli(pcm_int16: np.ndarray, sample_rate: int | None = None) ->
             "-t",
             str(config.WHISPER_THREADS),
         ]
+        if getattr(config, "WHISPER_FAST_DECODE", True):
+            cmd.extend(["-bo", "1", "-bs", "1", "-nf"])
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if r.returncode != 0:
             err = (r.stderr or r.stdout or "").strip()
