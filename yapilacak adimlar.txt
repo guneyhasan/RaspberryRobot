@@ -30,8 +30,13 @@ speaker-test -D hb -c 2 -t sine
 
 echo "Merhaba, ses sunucusunu geçici olarak devre dışı bıraktım." | piper --model ~/RaspberryRobot/models/tr_TR-dfki-medium.onnx --output-raw | pasuspender -- aplay -D plughw:2,0 -r 22050 -f S16_LE -t raw
 
+
+systemctl --user stop pipewire.service pipewire.socket wireplumber.service pulseaudio.service pulseaudio.socket
+
 echo "Merhaba, ses sunucusunu geçici olarak devre dışı bıraktım." | piper --model ~/RaspberryRobot/models/tr_TR-dfki-medium.onnx --output-raw | aplay -D plughw:2,0 -r 22050 -f S16_LE -t raw
 
+
+systemctl --user start pipewire.service wireplumber.service
 
 piper model
 cd ~/RaspberryRobot/models
