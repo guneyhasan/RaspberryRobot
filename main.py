@@ -446,10 +446,17 @@ def run_loop() -> None:
                     if not ok_transcript:
                         _log_line("SKIP", f'{tid} | metin wake eşleşmedi | text="{_safe_preview(text)}"')
                         continue
+                    # Wake phrase eşleşti → konuşma modunu otomatik aç
+                    conversation_mode = True
+                    _log_line("MODE", f"{tid} | conversation_mode=on | trigger=wake_auto")
                 elif not wake_word.audio_wake_enabled() and not config.REQUIRE_WAKE_PHRASE:
                     _log_line("WAKE_TXT", f"{tid} | audio_wake=off | require_wake_phrase=off | transcript_check=skipped")
+                    conversation_mode = True
+                    _log_line("MODE", f"{tid} | conversation_mode=on | trigger=wake_auto")
                 else:
                     _log_line("WAKE_AUDIO", f"{tid} | audio_wake=on (Wyoming/Porcupine) | transcript kontrolü opsiyonel")
+                    conversation_mode = True
+                    _log_line("MODE", f"{tid} | conversation_mode=on | trigger=wake_auto")
             else:
                 _log_line("MODE", f"{tid} | conversation_mode=on | wake_check=skipped")
 
