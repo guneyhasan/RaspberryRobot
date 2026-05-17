@@ -71,3 +71,57 @@ sudo reboot
 bash scripts/build_whisper.sh
 
 
+----
+sudo bash -c 'cat > /etc/systemd/system/speaker-enable.service << EOF
+[Unit]
+Description=Enable robot-hat speaker amplifier GPIO 20
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/pinctrl set 20 op dh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF'
+
+
+sudo systemctl daemon-reload
+sudo systemctl enable speaker-enable
+sudo systemctl status speaker-enable
+
+
+-----
+sudo mkdir -p /etc/environment.d
+
+sudo tee /etc/environment.d/robot-audio.conf > /dev/null << 'EOF'
+SDL_AUDIODRIVER=alsa
+AUDIODEV=plughw:sndrpihifiberry,0
+EOF
+
+echo "OK" && cat /etc/environment.d/robot-audio.conf
+
+echo 'export SDL_AUDIODRIVER=alsa' >> ~/.bashrc && \
+echo 'export AUDIODEV=plughw:sndrpihifiberry,0' >> ~/.bashrc && \
+source ~/.bashrc && \
+echo "BASHRC OK"
+
+sudo tee /etc/systemd/system/speaker-enable.service > /dev/null << 'EOF'
+[Unit]
+Description=Enable PiCar-X Speaker Amplifier
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/pinctrl set 20 op dh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload && \
+sudo systemctl enable speaker-enable.service && \
+sudo systemctl start speaker-enable.service && \
+echo "SERVIS OK"

@@ -49,8 +49,8 @@ else
 fi
 
 if [[ -f models/download-ggml-model.sh ]]; then
-  echo "[build_whisper] ggml-small model indiriliyor..."
-  bash models/download-ggml-model.sh small
+  echo "[build_whisper] ggml-base model indiriliyor (Türkçe + hız dengesi; quant için whisper.cpp quantize kullanılabilir)..."
+  bash models/download-ggml-model.sh base
 else
   echo "[build_whisper] UYARI: models/download-ggml-model.sh yok"
 fi

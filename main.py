@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import config  # noqa: E402
-from modules import battery, camera, head, llm, memory, motion, stt, tts, wake_word  # noqa: E402
+from modules import battery, camera, head, llm, memory, motion, phrases, stt, tts, wake_word  # noqa: E402
 from modules import health  # noqa: E402
 
 logger = logging.getLogger("robot_kanka")
@@ -59,7 +59,55 @@ def _safe_preview(text: str, limit: int = 220) -> str:
     return t[: limit - 1] + "…"
 
 
-def _has_any_phrase(text: str, phrases: tuple[str, ...]) -> bool:
+def _build_llm_messages(user_text: str) -> list[dict[str, str]]:
+    messages: list[dict[str, str]] = [{"role": "system", "content": memory.build_system_prompt()}]
+    messages.extend(memory.recent_chat_messages(max_turns=3))
+    messages.append({"role": "user", "content": user_text})
+    return messages
+
+
+def _speak_reply(
+    reply: str,
+    *,
+    prefer_online: bool = True,
+    force_piper: bool = False,
+    tid: str = "",
+) -> tuple[str, float]:
+    try:
+        if force_piper:
+            kind, duration = tts.speak(reply, prefer_online=False)
+        else:
+            kind, duration = tts.speak(reply, prefer_online=prefer_online)
+    except Exception as e:
+        _log_line("TTS_ERR", f"{tid} | prefer_online failed: {type(e).__name__}: {e}")
+        kind, duration = tts.speak(reply, prefer_online=False)
+    return kind, duration
+
+
+def _llm_reply_and_speak(text: str, tid: str) -> str:
+    messages = _build_llm_messages(text)
+    parts: list[str] = []
+
+    def on_sentence(s: str) -> None:
+        parts.append(s)
+        try:
+            tts.speak(s, prefer_online=True)
+        except Exception as e:
+            logger.warning("TTS cümle hatası, Piper: %s", e)
+            tts.speak(s, prefer_online=False)
+
+    t_llm0 = time.perf_counter()
+    full = llm.ask_stream_sentences(messages, on_sentence=on_sentence)
+    t_llm1 = time.perf_counter()
+    reply = (full or " ".join(parts)).strip()
+    _log_line(
+        "LLM_OK",
+        f'{tid} | provider={llm.selected_provider()} | stream=1 | elapsed={_fmt_ms(t_llm1 - t_llm0)} | reply_preview="{_safe_preview(reply)}"',
+    )
+    return reply or phrases.pick("llm_fallback")
+
+
+def _has_any_phrase(text: str, phrases_tuple: tuple[str, ...]) -> bool:
     def norm(s: str) -> str:
         # casefold: Türkçe I/İ gibi harflerde daha güvenilir
         s = (s or "").casefold()
@@ -69,9 +117,9 @@ def _has_any_phrase(text: str, phrases: tuple[str, ...]) -> bool:
         return s
 
     t = norm(text or "")
-    if not phrases:
+    if not phrases_tuple:
         return False
-    for p in phrases:
+    for p in phrases_tuple:
         if not p:
             continue
         if norm(p) in t:
@@ -91,38 +139,38 @@ def route_intents(text: str) -> str | None:
         if not head.is_available():
             return "Kafa servoları hazır değil kanka."
         head.safe_center("voice_head_center")
-        return "Tamam kanka."
+        return phrases.pick("ack")
 
     if any(p in low for p in ("kafa sağ", "kafayı sağa", "kafani saga", "kafanı sağa", "kafayi saga", "sağa bak", "saga bak")):
         if not head.is_available():
             return "Kafa servoları hazır değil kanka."
         head.nudge(pan_delta=abs(float(getattr(config, "HEAD_NUDGE_DEG", 20.0))))
-        return "Tamam kanka."
+        return phrases.pick("ack")
 
     if any(p in low for p in ("kafa sol", "kafayı sola", "kafani sola", "kafanı sola", "sola bak")):
         if not head.is_available():
             return "Kafa servoları hazır değil kanka."
         head.nudge(pan_delta=-abs(float(getattr(config, "HEAD_NUDGE_DEG", 20.0))))
-        return "Tamam kanka."
+        return phrases.pick("ack")
 
     if any(p in low for p in ("kafa yukarı", "kafayı yukarı", "kafani yukari", "kafanı yukarı", "yukarı bak", "yukari bak")):
         if not head.is_available():
             return "Kafa servoları hazır değil kanka."
         head.nudge(tilt_delta=abs(float(getattr(config, "HEAD_NUDGE_DEG", 20.0))))
-        return "Tamam kanka."
+        return phrases.pick("ack")
 
     if any(p in low for p in ("kafa aşağı", "kafayı aşağı", "kafani asagi", "kafanı aşağı", "aşağı bak", "asagi bak")):
         if not head.is_available():
             return "Kafa servoları hazır değil kanka."
         head.nudge(tilt_delta=-abs(float(getattr(config, "HEAD_NUDGE_DEG", 20.0))))
-        return "Tamam kanka."
+        return phrases.pick("ack")
 
     # Hareket komutları (LLM'e gitmeden)
     # Not: Güvenlik için kısa süreli hareket (DEFAULT_MOVE_SECONDS) şeklinde ele alıyoruz.
     # "dur" komutu her zaman anında durdurur.
     if any(w in low for w in ("dur", "stop", "bekle", "kapan", "fren")):
         motion.safe_stop("voice_command_stop")
-        return "Tamam kanka, durdum."
+        return phrases.pick("ack") + " Durdum."
 
     # Basit yön komutları: ileri/geri/sağ/sol
     forward_triggers = (
@@ -151,25 +199,25 @@ def route_intents(text: str) -> str | None:
         if not motion.is_available():
             return "Hareket için Robot-HAT kütüphanesi hazır değil kanka."
         motion.drive_for(throttle=throttle, steering=float(getattr(config, "STEERING_CENTER_DEG", 0.0)), seconds=move_sec)
-        return "Tamam kanka."
+        return phrases.pick("ack")
 
     if any(t in low for t in backward_triggers):
         if not motion.is_available():
             return "Hareket için Robot-HAT kütüphanesi hazır değil kanka."
         motion.drive_for(throttle=-abs(throttle), steering=float(getattr(config, "STEERING_CENTER_DEG", 0.0)), seconds=move_sec)
-        return "Tamam kanka."
+        return phrases.pick("ack")
 
     if any(t in low for t in left_triggers):
         if not motion.is_available():
             return "Hareket için Robot-HAT kütüphanesi hazır değil kanka."
         motion.drive_for(throttle=throttle, steering=-abs(turn_deg), seconds=move_sec)
-        return "Tamam kanka."
+        return phrases.pick("ack")
 
     if any(t in low for t in right_triggers):
         if not motion.is_available():
             return "Hareket için Robot-HAT kütüphanesi hazır değil kanka."
         motion.drive_for(throttle=throttle, steering=abs(turn_deg), seconds=move_sec)
-        return "Tamam kanka."
+        return phrases.pick("ack")
 
     # Pil durumu soruları (LLM'e gitmeden direkt yanıt)
     battery_triggers = (
@@ -262,6 +310,8 @@ def run_loop() -> None:
         logger.exception("STT arka uç hazırlığı başarısız: %s", e)
         raise
 
+    stt.clear_stt_dialogue_hint()
+
     try:
         tts.speak(config.STARTUP_PHRASE, prefer_online=False)
     except Exception as e:
@@ -307,7 +357,12 @@ def run_loop() -> None:
 
     seq = 0
     conversation_mode = False
+    last_nudge_at = 0.0
     while True:
+        if tts.is_speaking():
+            time.sleep(0.05)
+            continue
+
         seq += 1
         tid = _trace_id(seq)
         _log_line(
@@ -317,9 +372,39 @@ def run_loop() -> None:
         try:
             t_listen0 = time.perf_counter()
             try:
-                text, conf = stt.listen_and_transcribe()
+                if (
+                    conversation_mode
+                    and getattr(config, "CONVERSATION_NUDGE_ENABLED", True)
+                ):
+                    text, conf = stt.listen_for_speech_and_transcribe(
+                        float(getattr(config, "CONVERSATION_NUDGE_SEC", 8)),
+                        require_wake=False,
+                    )
+                    if not text.strip():
+                        now = time.time()
+                        cooldown = float(getattr(config, "CONVERSATION_NUDGE_COOLDOWN_SEC", 25))
+                        if now - last_nudge_at >= cooldown:
+                            nudge_this_turn = True
+                            reply = phrases.pick("nudge")
+                            _log_line("NUDGE", f"{tid} | {reply}")
+                            force_piper = bool(getattr(config, "TTS_PREFER_PIPER_FOR_NUDGE", True))
+                            kind, duration = _speak_reply(
+                                reply,
+                                prefer_online=not force_piper,
+                                force_piper=force_piper,
+                                tid=tid,
+                            )
+                            _log_line("TTS", f"{tid} | {kind} | nudge | duration={duration:.1f}s")
+                            last_nudge_at = now
+                        else:
+                            _log_line("SKIP", f"{tid} | sessizlik (nudge cooldown)")
+                        continue
+                else:
+                    text, conf = stt.listen_and_transcribe(
+                        require_wake=not conversation_mode,
+                    )
             except Exception as e:
-                _log_line("STT_ERROR", f"{tid} | listen_and_transcribe exception: {type(e).__name__}: {e}")
+                _log_line("STT_ERROR", f"{tid} | listen exception: {type(e).__name__}: {e}")
                 raise
             t_listen1 = time.perf_counter()
 
@@ -336,27 +421,21 @@ def run_loop() -> None:
             if not conversation_mode and _has_any_phrase(text, config.CONVERSATION_ACTIVATE_PHRASES):
                 conversation_mode = True
                 _log_line("MODE", f"{tid} | conversation_mode=on | trigger=activate")
-                reply = "Buradayım kanka. Dinliyorum."
+                reply = phrases.pick("activate")
                 _log_line("RESPONSE", reply)
-                try:
-                    kind, duration = tts.speak(reply, prefer_online=True)
-                except Exception as e:
-                    _log_line("TTS_ERR", f"{tid} | prefer_online failed: {type(e).__name__}: {e}")
-                    kind, duration = tts.speak(reply, prefer_online=False)
+                kind, duration = _speak_reply(reply, prefer_online=True, tid=tid)
                 _log_line("TTS", f"{tid} | {kind} | synth+play={duration:.1f}s | text_len={len(reply)}")
+                stt.record_dialogue_turn_for_stt(text, reply)
                 continue
 
             if conversation_mode and _has_any_phrase(text, config.CONVERSATION_DEACTIVATE_PHRASES):
                 conversation_mode = False
                 _log_line("MODE", f"{tid} | conversation_mode=off | trigger=deactivate")
-                reply = "Görüşürüz kanka."
+                reply = phrases.pick("deactivate")
                 _log_line("RESPONSE", reply)
-                try:
-                    kind, duration = tts.speak(reply, prefer_online=True)
-                except Exception as e:
-                    _log_line("TTS_ERR", f"{tid} | prefer_online failed: {type(e).__name__}: {e}")
-                    kind, duration = tts.speak(reply, prefer_online=False)
+                kind, duration = _speak_reply(reply, prefer_online=True, tid=tid)
                 _log_line("TTS", f"{tid} | {kind} | synth+play={duration:.1f}s | text_len={len(reply)}")
+                stt.clear_stt_dialogue_hint()
                 continue
 
             # Konuşma modu kapalıysa wake zorunluluğu uygula; mod açıksa direkt devam et.
@@ -377,6 +456,7 @@ def run_loop() -> None:
             _log_line("HEARD", f"{text} | confidence: {conf:.2f}")
 
             t_route0 = time.perf_counter()
+            tts_via_llm_stream = False
             reply: str | None = route_intents(text)
             if reply is None:
                 has_net = tts.internet_available()
@@ -390,29 +470,25 @@ def run_loop() -> None:
                     _log_line("OFFLINE", f"{tid} | internet yok → offline_responses eşleşti mi? {'yes' if reply else 'no'}")
                 if reply is None:
                     if not llm.is_available():
-                        reply = memory.get_offline_response(text) or "Şu an bağlantı veya anahtar yok kanka."
+                        reply = memory.get_offline_response(text) or phrases.pick(
+                            "offline_no_key",
+                            fallback="Şu an bağlantı veya anahtar yok kanka.",
+                        )
                         _log_line("ROUTE", f"{tid} | llm_key yok → offline/fallback seçildi")
                     else:
                         try:
                             _log_line("SENT_TO_LLM", text)
-                            sys_prompt = memory.build_system_prompt()
-                            messages = [
-                                {"role": "system", "content": sys_prompt},
-                                {"role": "user", "content": text},
-                            ]
                             t_llm0 = time.perf_counter()
-                            reply = llm.ask(messages)
+                            reply = _llm_reply_and_speak(text, tid)
+                            tts_via_llm_stream = True
                             t_llm1 = time.perf_counter()
                             _log_line(
-                                "LLM_OK",
-                                f'{tid} | provider={llm.selected_provider()} | model={config.MODEL if (llm.selected_provider() or "")=="openai" else config.GROQ_MODEL} | elapsed={_fmt_ms(t_llm1 - t_llm0)} | reply_preview="{_safe_preview(reply)}"',
+                                "LLM_DONE",
+                                f"{tid} | total_with_tts={_fmt_ms(t_llm1 - t_llm0)}",
                             )
                         except Exception as e:
                             logger.warning("LLM hatası: %s", e)
-                            reply = (
-                                memory.get_offline_response(text)
-                                or "Bir saniye kanka, bağlantı yavaş."
-                            )
+                            reply = memory.get_offline_response(text) or phrases.pick("llm_fallback")
                             if "limiti" in str(e).lower():
                                 reply = "Günlük konuşma limitine yaklaştık kanka."
                             _log_line(
@@ -427,19 +503,18 @@ def run_loop() -> None:
 
             memory.append_conversation_line("Kullanıcı", text)
             memory.append_conversation_line("Kanka", reply)
+            stt.record_dialogue_turn_for_stt(text, reply)
 
-            try:
+            if not tts_via_llm_stream:
                 t_tts0 = time.perf_counter()
-                kind, duration = tts.speak(reply, prefer_online=True)
-            except Exception as e:
-                logger.warning("TTS hatası, Piper deneniyor: %s", e)
-                _log_line("TTS_ERR", f"{tid} | prefer_online failed: {type(e).__name__}: {e}")
-                kind, duration = tts.speak(reply, prefer_online=False)
-            t_tts1 = time.perf_counter()
-            _log_line(
-                "TTS",
-                f"{tid} | {kind} | synth+play={duration:.1f}s | call_elapsed={_fmt_ms(t_tts1 - t_tts0)} | text_len={len(reply)}",
-            )
+                kind, duration = _speak_reply(reply, prefer_online=True, tid=tid)
+                t_tts1 = time.perf_counter()
+                _log_line(
+                    "TTS",
+                    f"{tid} | {kind} | synth+play={duration:.1f}s | call_elapsed={_fmt_ms(t_tts1 - t_tts0)} | text_len={len(reply)}",
+                )
+            else:
+                _log_line("TTS", f"{tid} | streamed_during_llm | text_len={len(reply)}")
 
         except KeyboardInterrupt:
             logger.info("Kullanıcı durdurdu.")

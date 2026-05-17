@@ -74,21 +74,39 @@ def _find_whisper_model(base: Path) -> Path:
         if p.is_file():
             return p
     models_dir = base / "models"
+    # Hız önceliği (Türkçe için base tipik sweet spot); yoksa small/tiny düşer.
     if models_dir.is_dir():
         for name in (
-            "ggml-small.bin",
+            "ggml-base-q5_0.bin",
+            "ggml-base-q5_1.bin",
+            "ggml-base-q8_0.bin",
+            "ggml-base.bin",
+            "ggml-tiny-q8_0.bin",
+            "ggml-tiny-q5_1.bin",
+            "ggml-tiny.bin",
             "ggml-small-q5_0.bin",
             "ggml-small-q8_0.bin",
+            "ggml-small.bin",
         ):
             c = (models_dir / name).resolve()
             if c.is_file():
                 return c
-    return (base / "models" / "ggml-small.bin").resolve()
+    return (base / "models" / "ggml-base.bin").resolve()
 
 
 WHISPER_BINARY = _find_whisper_binary(WHISPER_CPP_DIR)
 WHISPER_MODEL = _find_whisper_model(WHISPER_CPP_DIR)
-WHISPER_THREADS = int(os.getenv("WHISPER_THREADS", "4"))
+
+
+def _default_whisper_threads() -> int:
+    raw = os.getenv("WHISPER_THREADS", "").strip()
+    if raw:
+        return max(1, int(raw))
+    n = os.cpu_count() or 4
+    return max(1, min(n, 8))
+
+
+WHISPER_THREADS = _default_whisper_threads()
 
 
 def _find_whisper_server_binary(base: Path) -> Path:
@@ -154,6 +172,11 @@ WHISPER_SERVER_BASE_URL = _env_str(
 
 # Sunucu + HTTP inference: düşük gecikme (robot); kapatırsanız whisper varsayılanları (daha ağır).
 WHISPER_FAST_DECODE = _env_bool("WHISPER_FAST_DECODE", True)
+# Son kullanıcı + robot cümlesini Whisper "prompt" ile gönderir (ağırlık öğrenmesi değil; bağlam ipucu).
+WHISPER_STT_DIALOG_HINT = _env_bool("WHISPER_STT_DIALOG_HINT", True)
+WHISPER_STT_PROMPT_MAX_CHARS = int(os.getenv("WHISPER_STT_PROMPT_MAX_CHARS", "200"))
+# Decoder önceki tur bağlamını taşır; biraz daha ağır olabilir. Hız öncelikliyse 0.
+WHISPER_STT_CARRY_CONTEXT = _env_bool("WHISPER_STT_CARRY_CONTEXT", False)
 
 PIPER_BINARY = _env_str("PIPER_BINARY", "piper")
 PIPER_MODEL_DIR = Path(_env_str("PIPER_MODEL_DIR", str(MODELS_DIR / "tr_TR-ahmet-medium")))
@@ -161,8 +184,30 @@ PIPER_MODEL_PATH = _env_str("PIPER_MODEL_PATH", "")
 
 SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
 VAD_THRESHOLD = float(os.getenv("VAD_THRESHOLD", "0.5"))
-SILENCE_END_SEC = float(os.getenv("SILENCE_END_SEC", "1.5"))
+SILENCE_END_SEC = float(os.getenv("SILENCE_END_SEC", "0.7"))
 MAX_UTTERANCE_SEC = float(os.getenv("MAX_UTTERANCE_SEC", "30"))
+# Çok kısa gürültü segmentlerini at (saniye).
+VAD_MIN_SPEECH_SEC = float(os.getenv("VAD_MIN_SPEECH_SEC", "0.25"))
+# Konuşma yeterince uzunsa sessizlik eşiğini düşür (erken endpointing).
+VAD_ADAPTIVE_ENDPOINTING = _env_bool("VAD_ADAPTIVE_ENDPOINTING", True)
+VAD_ADAPTIVE_MIN_SPEECH_SEC = float(os.getenv("VAD_ADAPTIVE_MIN_SPEECH_SEC", "0.5"))
+VAD_ADAPTIVE_SILENCE_SEC = float(os.getenv("VAD_ADAPTIVE_SILENCE_SEC", "0.35"))
+
+# Konuşma modu: sessizlik yoklaması
+CONVERSATION_NUDGE_ENABLED = _env_bool("CONVERSATION_NUDGE_ENABLED", True)
+CONVERSATION_NUDGE_SEC = float(os.getenv("CONVERSATION_NUDGE_SEC", "8"))
+CONVERSATION_NUDGE_COOLDOWN_SEC = float(os.getenv("CONVERSATION_NUDGE_COOLDOWN_SEC", "25"))
+
+# LLM / TTS streaming
+OPENAI_STREAM = _env_bool("OPENAI_STREAM", True)
+LLM_STREAM_ENABLED = _env_bool("LLM_STREAM_ENABLED", True)
+LLM_STREAM_MIN_SENTENCE_CHARS = int(os.getenv("LLM_STREAM_MIN_SENTENCE_CHARS", "12"))
+TTS_SENTENCE_PAUSE_SEC = float(os.getenv("TTS_SENTENCE_PAUSE_SEC", "0.1"))
+TTS_PREFER_PIPER_FOR_NUDGE = _env_bool("TTS_PREFER_PIPER_FOR_NUDGE", True)
+
+# Opsiyonel kısmi STT (deneysel, varsayılan kapalı)
+WHISPER_PARTIAL_HINT = _env_bool("WHISPER_PARTIAL_HINT", False)
+WHISPER_PARTIAL_INTERVAL_SEC = float(os.getenv("WHISPER_PARTIAL_INTERVAL_SEC", "1.2"))
 
 # sounddevice (PortAudio) input device selection.
 # Example: AUDIO_INPUT_DEVICE="USB PnP Sound Device" or AUDIO_INPUT_DEVICE="2"
@@ -227,7 +272,7 @@ OPENAI_API_KEY = _env_str("OPENAI_API_KEY", "")
 MODEL = os.getenv("MODEL", "gpt-4o-mini")
 VISION_MODEL = os.getenv("VISION_MODEL", "gpt-4o")
 TTS_VOICE = os.getenv("TTS_VOICE", "spruce")
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", "200"))
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", "100"))
 TIMEOUT_SECONDS = float(os.getenv("TIMEOUT_SECONDS", "8"))
 RETRY_ATTEMPTS = int(os.getenv("RETRY_ATTEMPTS", "2"))
 
@@ -236,7 +281,7 @@ RETRY_ATTEMPTS = int(os.getenv("RETRY_ATTEMPTS", "2"))
 # - If both are set → LLM_PROVIDER controls ("openai" or "groq"), default=openai
 GROQ_API_KEY = _env_str("GROQ_API_KEY", "")
 GROQ_MODEL = _env_str("GROQ_MODEL", "llama-3.3-70b-versatile")
-GROQ_STREAM = os.getenv("GROQ_STREAM", "0").strip().lower() in ("1", "true", "yes", "on")
+GROQ_STREAM = os.getenv("GROQ_STREAM", "1").strip().lower() in ("1", "true", "yes", "on")
 GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.6"))
 GROQ_TOP_P = float(os.getenv("GROQ_TOP_P", "1"))
 LLM_PROVIDER = _env_str("LLM_PROVIDER", "").lower()
@@ -284,7 +329,9 @@ Karakter:
 - "Komut okuyan robot" gibi değil, gerçek bir kanka gibi davran
 
 Teknik kısıtlamalar:
-- Cevapların maksimum 2-3 cümle olsun (sesli konuşma için ideal)
+- En fazla 1-2 kısa cümle; gereksiz açıklama yok
+- Aynı kalıbı ve cümleyi tekrarlama; her seferinde biraz farklı ifade et
+- Gündelik, sözlü Türkçe (resmi dil değil)
 - Markdown, liste, başlık kullanma (ses olarak okunacak)
 - Sadece düz, doğal Türkçe cümleler
 - API anahtarı, sağlayıcı seçimi, bağlantı durumu, entegrasyon hatası var/yok gibi altyapı detaylarını kendiliğinden iddia etme.

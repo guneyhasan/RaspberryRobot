@@ -5,6 +5,7 @@ import logging
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -16,6 +17,7 @@ import config
 logger = logging.getLogger(__name__)
 
 _client: Optional[OpenAI] = None
+_speaking = threading.Event()
 
 
 def _get_client() -> OpenAI:
@@ -146,12 +148,25 @@ def synthesize_piper_to_wav_file(text: str) -> Path:
     return out
 
 
+def is_speaking() -> bool:
+    return _speaking.is_set()
+
+
 def speak(text: str, prefer_online: bool = True) -> tuple[str, float]:
     """
     Metni sese çevirip oynatır.
     Returns: ("openai-spruce" | "piper", süre_saniye)
     """
     t0 = time.perf_counter()
+    _speaking.set()
+    used = "piper"
+    try:
+        return _speak_inner(text, prefer_online, t0)
+    finally:
+        _speaking.clear()
+
+
+def _speak_inner(text: str, prefer_online: bool, t0: float) -> tuple[str, float]:
     used = "piper"
     if prefer_online and internet_available() and config.OPENAI_API_KEY:
         audio = synthesize_openai_tts(text)
@@ -178,3 +193,29 @@ def speak(text: str, prefer_online: bool = True) -> tuple[str, float]:
             wav_path.unlink(missing_ok=True)
     duration = time.perf_counter() - t0
     return used, duration
+
+
+def speak_sentences(
+    sentences: list[str],
+    *,
+    prefer_online: bool = True,
+    pause_between: float | None = None,
+) -> tuple[str, float]:
+    """Cümleleri sırayla seslendirir (ilk cümle daha erken duyulur)."""
+    pause = pause_between if pause_between is not None else float(getattr(config, "TTS_SENTENCE_PAUSE_SEC", 0.1))
+    t0 = time.perf_counter()
+    last_kind = "piper"
+    _speaking.set()
+    try:
+        first = True
+        for sent in sentences:
+            s = sent.strip()
+            if not s:
+                continue
+            if not first and pause > 0:
+                time.sleep(pause)
+            first = False
+            last_kind, _ = _speak_inner(s, prefer_online, time.perf_counter())
+    finally:
+        _speaking.clear()
+    return last_kind, time.perf_counter() - t0

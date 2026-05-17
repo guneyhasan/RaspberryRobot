@@ -32,6 +32,35 @@ logger = logging.getLogger(__name__)
 _server_proc: subprocess.Popen[bytes] | None = None
 _server_lock = threading.RLock()
 
+_dialog_lock = threading.RLock()
+_dialog_prompt_tail: str = ""
+
+
+def clear_stt_dialogue_hint() -> None:
+    """Konuşma modu kapandığında veya oturum başında Whisper metin ipucunu sıfırla."""
+    global _dialog_prompt_tail
+    with _dialog_lock:
+        _dialog_prompt_tail = ""
+
+
+def record_dialogue_turn_for_stt(user_text: str, assistant_text: str) -> None:
+    """
+    Son turu Whisper HTTP `prompt` alanına yansıtır.
+    Model ağırlıkları güncellenmez; sadece bir sonraki transkripsiyonda bağlam ipucu verilir.
+    """
+    global _dialog_prompt_tail
+    if not getattr(config, "WHISPER_STT_DIALOG_HINT", True):
+        return
+    u = " ".join((user_text or "").split())
+    a = " ".join((assistant_text or "").split())
+    if not u and not a:
+        return
+    chunk = f"Kullanıcı: {u}\nKanka: {a}"
+    mx = max(32, int(getattr(config, "WHISPER_STT_PROMPT_MAX_CHARS", 200)))
+    with _dialog_lock:
+        _dialog_prompt_tail = chunk[:mx]
+        logger.debug("STT: dialog prompt güncellendi (len=%s)", len(_dialog_prompt_tail))
+
 
 def _uses_server() -> bool:
     return getattr(config, "WHISPER_STT_BACKEND", "cli") == "server"
@@ -187,7 +216,16 @@ def _multipart_inference_body(wav_bytes: bytes) -> tuple[bytes, str]:
         add_field("temperature_inc", "0.2")
         add_field("best_of", "1")
         add_field("beam_size", "1")
-        add_field("no_context", "true")
+        if getattr(config, "WHISPER_STT_CARRY_CONTEXT", False):
+            add_field("no_context", "false")
+        else:
+            add_field("no_context", "true")
+    if getattr(config, "WHISPER_STT_DIALOG_HINT", True):
+        with _dialog_lock:
+            tail = _dialog_prompt_tail.strip()
+        if tail:
+            mx = max(32, int(getattr(config, "WHISPER_STT_PROMPT_MAX_CHARS", 200)))
+            add_field("prompt", tail[:mx])
     parts.append(f"--{boundary}--".encode() + crlf)
     body = b"".join(parts)
     ctype = f"multipart/form-data; boundary={boundary}"
@@ -305,42 +343,48 @@ def transcribe_pcm(pcm_int16: np.ndarray, sample_rate: int | None = None) -> tup
         wav_path.unlink(missing_ok=True)
 
 
-def listen_and_transcribe() -> tuple[str, float]:
-    """VAD → ses tabanlı wake (varsa) → whisper."""
+def _partial_on_audio(pcm: np.ndarray) -> None:
+    """Deneysel: konuşma sırasında kısmi transkript → Whisper prompt ipucu."""
+    if not getattr(config, "WHISPER_PARTIAL_HINT", False):
+        return
+    min_samples = int(0.8 * config.SAMPLE_RATE)
+    if len(pcm) < min_samples:
+        return
+    try:
+        text, _ = transcribe_pcm(pcm)
+        text = " ".join((text or "").split())
+        if not text:
+            return
+        mx = max(32, int(getattr(config, "WHISPER_STT_PROMPT_MAX_CHARS", 200)))
+        with _dialog_lock:
+            global _dialog_prompt_tail
+            _dialog_prompt_tail = f"Kullanıcı: {text}"[:mx]
+        logger.debug('STT partial hint: "%s"', text[:80])
+    except Exception as e:
+        logger.debug("STT partial atlandı: %s", e)
+
+
+def _vad_on_partial():
+    if getattr(config, "WHISPER_PARTIAL_HINT", False):
+        return _partial_on_audio
+    return None
+
+
+def _transcribe_audio_segment(audio: np.ndarray, *, require_wake: bool) -> tuple[str, float]:
     from modules import wake_word
 
-    t0 = time.perf_counter()
-    logger.info(
-        "STT: dinleme başlıyor (backend=%s, sr=%s, vad_thr=%.2f, silence_end=%.1fs, max=%.1fs)",
-        getattr(config, "WHISPER_STT_BACKEND", "cli"),
-        config.SAMPLE_RATE,
-        config.VAD_THRESHOLD,
-        config.SILENCE_END_SEC,
-        config.MAX_UTTERANCE_SEC,
-    )
-    audio = vad.record_utterance()
-    t1 = time.perf_counter()
-    if audio is None:
-        logger.info("STT: VAD konuşma bulamadı (elapsed=%0.1fs)", t1 - t0)
-        return "", 0.0
     if len(audio) < 1000:
-        logger.info("STT: çok kısa segment (samples=%s, elapsed=%0.1fs) — atlandı", len(audio), t1 - t0)
+        logger.info("STT: çok kısa segment (samples=%s) — atlandı", len(audio))
         return "", 0.0
 
-    logger.info(
-        "STT: segment alındı (samples=%s, sec=%0.2f, elapsed=%0.1fs)",
-        len(audio),
-        len(audio) / float(config.SAMPLE_RATE),
-        t1 - t0,
-    )
-
-    t_w0 = time.perf_counter()
-    wake_ok = wake_word.passes_wake_gate(audio)
-    t_w1 = time.perf_counter()
-    if not wake_ok:
-        logger.info("STT: wake gate geçmedi (elapsed=%0.1fs) — atlandı", t_w1 - t_w0)
-        return "", 0.0
-    logger.info("STT: wake gate geçti (elapsed=%0.1fs)", t_w1 - t_w0)
+    if require_wake:
+        t_w0 = time.perf_counter()
+        wake_ok = wake_word.passes_wake_gate(audio)
+        t_w1 = time.perf_counter()
+        if not wake_ok:
+            logger.info("STT: wake gate geçmedi (elapsed=%0.1fs) — atlandı", t_w1 - t_w0)
+            return "", 0.0
+        logger.info("STT: wake gate geçti (elapsed=%0.1fs)", t_w1 - t_w0)
 
     t_tr0 = time.perf_counter()
     text, conf = transcribe_pcm(audio)
@@ -352,3 +396,43 @@ def listen_and_transcribe() -> tuple[str, float]:
         " ".join(text.split())[:220],
     )
     return text, conf
+
+
+def listen_for_speech_and_transcribe(
+    timeout_sec: float,
+    *,
+    require_wake: bool = True,
+) -> tuple[str, float]:
+    """Süre dolana kadar bekler; konuşma varsa transkribe eder."""
+    t0 = time.perf_counter()
+    audio = vad.listen_for_speech(timeout_sec, on_partial=_vad_on_partial())
+    t1 = time.perf_counter()
+    if audio is None:
+        logger.info("STT: idle timeout / konuşma yok (elapsed=%0.1fs)", t1 - t0)
+        return "", 0.0
+    return _transcribe_audio_segment(audio, require_wake=require_wake)
+
+
+def listen_and_transcribe(*, require_wake: bool = True) -> tuple[str, float]:
+    """VAD → ses tabanlı wake (varsa) → whisper."""
+    t0 = time.perf_counter()
+    logger.info(
+        "STT: dinleme başlıyor (backend=%s, sr=%s, vad_thr=%.2f, silence_end=%.1fs, max=%.1fs)",
+        getattr(config, "WHISPER_STT_BACKEND", "cli"),
+        config.SAMPLE_RATE,
+        config.VAD_THRESHOLD,
+        config.SILENCE_END_SEC,
+        config.MAX_UTTERANCE_SEC,
+    )
+    audio = vad.record_utterance(on_partial=_vad_on_partial())
+    t1 = time.perf_counter()
+    if audio is None:
+        logger.info("STT: VAD konuşma bulamadı (elapsed=%0.1fs)", t1 - t0)
+        return "", 0.0
+    logger.info(
+        "STT: segment alındı (samples=%s, sec=%0.2f, elapsed=%0.1fs)",
+        len(audio),
+        len(audio) / float(config.SAMPLE_RATE),
+        t1 - t0,
+    )
+    return _transcribe_audio_segment(audio, require_wake=require_wake)

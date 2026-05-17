@@ -88,7 +88,10 @@ def _multipart_infer(wav_bytes: bytes, infer_url: str, timeout: float) -> tuple[
                 ("temperature_inc", "0.2"),
                 ("best_of", "1"),
                 ("beam_size", "1"),
-                ("no_context", "true"),
+                (
+                    "no_context",
+                    "false" if getattr(config, "WHISPER_STT_CARRY_CONTEXT", False) else "true",
+                ),
             ]
         )
     for name, val in fields:

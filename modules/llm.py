@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
+from collections.abc import Callable
 from typing import Any, Optional
 
 from openai import APIError, APITimeoutError, OpenAI, RateLimitError
@@ -13,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 _client: Optional[OpenAI] = None
 _groq_client = None
+
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?…])\s+")
 
 
 def _get_client() -> OpenAI:
@@ -80,12 +84,6 @@ def ensure_daily_quota() -> None:
 
 
 def _select_provider() -> str:
-    """
-    Returns: "openai" | "groq"
-    Seçim mantığı:
-    - Sadece biri varsa otomatik.
-    - İkisi de varsa LLM_PROVIDER (openai/groq) kullanılır; boşsa openai.
-    """
     has_openai = bool(config.OPENAI_API_KEY)
     has_groq = bool(config.GROQ_API_KEY)
     if has_openai and not has_groq:
@@ -100,7 +98,6 @@ def _select_provider() -> str:
 
 
 def selected_provider() -> str | None:
-    """Şu anki .env'e göre seçilecek provider (anahtar yoksa None)."""
     try:
         return _select_provider()
     except Exception:
@@ -108,75 +105,179 @@ def selected_provider() -> str | None:
 
 
 def is_available() -> bool:
-    """Herhangi bir LLM anahtarı var mı?"""
     return bool(config.OPENAI_API_KEY or config.GROQ_API_KEY)
 
 
-def ask(messages: list[dict[str, Any]]) -> str:
+def _stream_enabled_for(provider: str) -> bool:
+    if not getattr(config, "LLM_STREAM_ENABLED", True):
+        return False
+    if provider == "openai":
+        return bool(getattr(config, "OPENAI_STREAM", True))
+    return bool(getattr(config, "GROQ_STREAM", True))
+
+
+class _SentenceBuffer:
+    def __init__(self, min_chars: int, on_sentence: Callable[[str], None]) -> None:
+        self._buf = ""
+        self._min = max(4, min_chars)
+        self._on_sentence = on_sentence
+
+    def push(self, delta: str) -> None:
+        if not delta:
+            return
+        self._buf += delta
+        self._drain(final=False)
+
+    def flush(self) -> None:
+        self._drain(final=True)
+
+    def _drain(self, *, final: bool) -> None:
+        while True:
+            m = _SENTENCE_SPLIT.search(self._buf)
+            if m:
+                sent = self._buf[: m.start()].strip()
+                self._buf = self._buf[m.end() :]
+                if sent and len(sent) >= self._min:
+                    self._on_sentence(sent)
+                continue
+            if final:
+                rest = self._buf.strip()
+                self._buf = ""
+                if rest and (len(rest) >= self._min or final):
+                    self._on_sentence(rest)
+            break
+
+
+def _emit_sentences_from_text(text: str, on_sentence: Callable[[str], None]) -> None:
+    min_c = int(getattr(config, "LLM_STREAM_MIN_SENTENCE_CHARS", 12))
+    buf = _SentenceBuffer(min_c, on_sentence)
+    buf.push(text)
+    buf.flush()
+
+
+def _stream_openai(messages: list[dict[str, Any]], on_token: Callable[[str], None]) -> str:
+    client = _get_client()
+    stream = client.chat.completions.create(
+        model=config.MODEL,
+        messages=messages,
+        max_tokens=config.MAX_TOKENS,
+        stream=True,
+    )
+    parts: list[str] = []
+    for chunk in stream:
+        delta = chunk.choices[0].delta.content or ""
+        if delta:
+            parts.append(delta)
+            on_token(delta)
+    return "".join(parts).strip()
+
+
+def _stream_groq(messages: list[dict[str, Any]], on_token: Callable[[str], None]) -> str:
+    client = _get_groq_client()
+    completion = client.chat.completions.create(
+        model=config.GROQ_MODEL,
+        messages=messages,
+        temperature=config.GROQ_TEMPERATURE,
+        max_completion_tokens=max(16, int(config.MAX_TOKENS)),
+        top_p=config.GROQ_TOP_P,
+        stream=True,
+        stop=None,
+    )
+    parts: list[str] = []
+    for chunk in completion:
+        delta = chunk.choices[0].delta.content or ""
+        if delta:
+            parts.append(delta)
+            on_token(delta)
+    return "".join(parts).strip()
+
+
+def _ask_non_stream(messages: list[dict[str, Any]], provider: str) -> str:
+    if provider == "openai":
+        client = _get_client()
+        resp = client.chat.completions.create(
+            model=config.MODEL,
+            messages=messages,
+            max_tokens=config.MAX_TOKENS,
+        )
+        _bump_daily()
+        return (resp.choices[0].message.content or "").strip()
+
+    client = _get_groq_client()
+    resp = client.chat.completions.create(
+        model=config.GROQ_MODEL,
+        messages=messages,
+        temperature=config.GROQ_TEMPERATURE,
+        max_completion_tokens=max(16, int(config.MAX_TOKENS)),
+        top_p=config.GROQ_TOP_P,
+        stream=False,
+        stop=None,
+    )
+    _bump_daily()
+    return (resp.choices[0].message.content or "").strip()
+
+
+def ask_stream_sentences(
+    messages: list[dict[str, Any]],
+    on_sentence: Callable[[str], None],
+) -> str:
     """
-    OpenAI veya Groq üzerinden cevap döndürür (messages OpenAI formatında).
-    Groq tarafı OpenAI-benzeri Chat Completions API sağlar.
+    LLM yanıtını cümle cümle iletir; tam metni döndürür.
     """
     ensure_daily_quota()
-
     provider = _select_provider()
+    min_c = int(getattr(config, "LLM_STREAM_MIN_SENTENCE_CHARS", 12))
+    sent_buf = _SentenceBuffer(min_c, on_sentence)
+    use_stream = _stream_enabled_for(provider)
+
     last_err: Optional[Exception] = None
     delay = 1.0
     for attempt in range(config.RETRY_ATTEMPTS + 1):
         try:
-            if provider == "openai":
-                client = _get_client()
-                resp = client.chat.completions.create(
-                    model=config.MODEL,
-                    messages=messages,
-                    max_tokens=config.MAX_TOKENS,
-                )
-                _bump_daily()
-                choice = resp.choices[0]
-                return (choice.message.content or "").strip()
+            if use_stream:
 
-            client = _get_groq_client()
-            if config.GROQ_STREAM:
-                completion = client.chat.completions.create(
-                    model=config.GROQ_MODEL,
-                    messages=messages,
-                    temperature=config.GROQ_TEMPERATURE,
-                    max_completion_tokens=max(16, int(config.MAX_TOKENS)),
-                    top_p=config.GROQ_TOP_P,
-                    stream=True,
-                    stop=None,
-                )
-                buf: list[str] = []
-                for chunk in completion:
-                    delta = chunk.choices[0].delta.content or ""
-                    if delta:
-                        buf.append(delta)
-                _bump_daily()
-                return "".join(buf).strip()
-            resp = client.chat.completions.create(
-                model=config.GROQ_MODEL,
-                messages=messages,
-                temperature=config.GROQ_TEMPERATURE,
-                max_completion_tokens=max(16, int(config.MAX_TOKENS)),
-                top_p=config.GROQ_TOP_P,
-                stream=False,
-                stop=None,
-            )
-            _bump_daily()
-            choice = resp.choices[0]
-            return (choice.message.content or "").strip()
+                def on_token(delta: str) -> None:
+                    sent_buf.push(delta)
 
+                if provider == "openai":
+                    text = _stream_openai(messages, on_token)
+                else:
+                    text = _stream_groq(messages, on_token)
+                _bump_daily()
+                sent_buf.flush()
+                return text
+
+            text = _ask_non_stream(messages, provider)
+            _emit_sentences_from_text(text, on_sentence)
+            return text
+
+        except (APITimeoutError, RateLimitError, APIError, Exception) as e:
+            last_err = e
+            logger.warning("LLM stream deneme %s başarısız (provider=%s): %s", attempt + 1, provider, e)
+            time.sleep(delay)
+            delay *= 2
+    raise RuntimeError(f"LLM başarısız: {last_err}")
+
+
+def ask(messages: list[dict[str, Any]]) -> str:
+    """Tam yanıt (streaming kapalı veya callback yok)."""
+    ensure_daily_quota()
+    provider = _select_provider()
+    if _stream_enabled_for(provider):
+        return ask_stream_sentences(messages, on_sentence=lambda _s: None)
+
+    last_err: Optional[Exception] = None
+    delay = 1.0
+    for attempt in range(config.RETRY_ATTEMPTS + 1):
+        try:
+            return _ask_non_stream(messages, provider)
         except (APITimeoutError, RateLimitError, APIError, Exception) as e:
             last_err = e
             logger.warning("LLM deneme %s başarısız (provider=%s): %s", attempt + 1, provider, e)
             time.sleep(delay)
             delay *= 2
-    raise RuntimeError(f"OpenAI başarısız: {last_err}")
+    raise RuntimeError(f"LLM başarısız: {last_err}")
 
 
 def ask_openai(messages: list[dict[str, Any]]) -> str:
-    """
-    Geriye dönük uyumluluk: eski kod `ask_openai` çağırıyordu.
-    Artık sağlayıcıyı otomatik seçen `ask()`'e delege eder.
-    """
     return ask(messages)

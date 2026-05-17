@@ -94,8 +94,8 @@ if [[ -d "$ROOT/whisper.cpp" ]] && [[ ! -f "$ROOT/whisper.cpp/main" ]] && [[ ! -
       cmake --build build -j4 --target whisper-server 2>/dev/null || true; } || \
     { make -j4; })
 fi
-if [[ -d "$ROOT/whisper.cpp/models" ]] && [[ ! -f "$ROOT/whisper.cpp/models/ggml-small.bin" ]]; then
-  bash "$ROOT/whisper.cpp/models/download-ggml-model.sh" small || true
+if [[ -d "$ROOT/whisper.cpp/models" ]] && [[ ! -f "$ROOT/whisper.cpp/models/ggml-base.bin" ]] && [[ ! -f "$ROOT/whisper.cpp/models/ggml-small.bin" ]]; then
+  bash "$ROOT/whisper.cpp/models/download-ggml-model.sh" base || true
 fi
 
 echo "[install] whisper.cpp yoksa veya derleme hatası: bash scripts/build_whisper.sh"

@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import time
+from collections.abc import Callable
 from typing import Optional
 
 import numpy as np
@@ -22,8 +23,6 @@ def _load_silero():
     global _model, _utils
     if _model is not None:
         return _model, _utils
-    # Öncelik: pip ile gelen `silero-vad` paketi (internet gerektirmez).
-    # Fallback: torch.hub (ilk kurulumda GitHub'a çıkar, yavaş bağlantıda timeout yapabilir).
     try:
         from silero_vad import load_silero_vad  # type: ignore
 
@@ -46,31 +45,68 @@ def _load_silero():
     return _model, _utils
 
 
-def record_utterance(
-    sample_rate: int | None = None,
-    vad_threshold: float | None = None,
-    silence_end_sec: float | None = None,
-    max_sec: float | None = None,
+def _effective_silence_samples(
+    speech_samples: int,
+    sr: int,
+    base_silence_sec: float,
+) -> int:
+    """Uzun konuşmada daha kısa sessizlikle erken kes."""
+    if (
+        getattr(config, "VAD_ADAPTIVE_ENDPOINTING", True)
+        and speech_samples >= int(getattr(config, "VAD_ADAPTIVE_MIN_SPEECH_SEC", 0.5) * sr)
+    ):
+        sec = float(getattr(config, "VAD_ADAPTIVE_SILENCE_SEC", 0.35))
+        return int(sec * sr)
+    return int(base_silence_sec * sr)
+
+
+def _finalize_segment(
+    audio_parts: list[np.ndarray],
+    sr: int,
+    speech_samples: int,
+) -> Optional[np.ndarray]:
+    if not audio_parts:
+        return None
+    out = np.concatenate(audio_parts, axis=0)
+    min_samples = int(float(getattr(config, "VAD_MIN_SPEECH_SEC", 0.25)) * sr)
+    if speech_samples < min_samples:
+        logger.info(
+            "VAD: segment çok kısa (speech_samples=%s < min=%s) — atlandı",
+            speech_samples,
+            min_samples,
+        )
+        return None
+    return out
+
+
+def _capture_vad_loop(
+    read_chunk: Callable[[], Optional[np.ndarray]],
+    *,
+    sr: int,
+    thr: float,
+    silence_sec: float,
+    max_samples: int,
+    idle_timeout_sec: float | None = None,
+    on_partial: Callable[[np.ndarray], None] | None = None,
+    backend_label: str = "vad",
 ) -> Optional[np.ndarray]:
     """
-    Konuşma bitene kadar (sessizlik sonrası) kayıt döndürür.
-    int16 mono numpy array veya None (sessizlik / iptal).
+    Ortak VAD döngüsü.
+    idle_timeout_sec: konuşma başlamadan bu süre dolunca None döner.
     """
-    sr = sample_rate or config.SAMPLE_RATE
-    thr = vad_threshold if vad_threshold is not None else config.VAD_THRESHOLD
-    silence = silence_end_sec if silence_end_sec is not None else config.SILENCE_END_SEC
-    max_dur = max_sec if max_sec is not None else config.MAX_UTTERANCE_SEC
-
-    model, _utils = _load_silero()
-
+    model, _ = _load_silero()
     chunk_samples = 512 if sr == 16000 else 256
-    silence_samples = int(silence * sr)
-    max_samples = int(max_dur * sr)
 
     audio_parts: list[np.ndarray] = []
     silence_run = 0
     speaking = False
+    speech_samples = 0
     total = 0
+    t0 = time.perf_counter()
+    t_first_speech: float | None = None
+    idle_deadline = (time.monotonic() + idle_timeout_sec) if idle_timeout_sec else None
+    last_partial_at = 0.0
+    partial_interval = float(getattr(config, "WHISPER_PARTIAL_INTERVAL_SEC", 1.2))
 
     def vad_prob(chunk: np.ndarray) -> float:
         x = chunk.astype(np.float32) / 32768.0
@@ -82,105 +118,154 @@ def record_utterance(
         with torch.no_grad():
             return float(model(t, sr).item())
 
-    def read_with_arecord() -> Optional[np.ndarray]:
-        """
-        ALSA cihazından `arecord` ile ham PCM (S16_LE) okuyup VAD ile segment çıkarır.
-        sounddevice yanlış cihaz seçtiğinde en güvenilir yöntem.
-        """
-        dev = config.AUDIO_INPUT_ALSA_DEVICE
-        if not dev:
+    while total < max_samples:
+        if idle_deadline is not None and not speaking and time.monotonic() >= idle_deadline:
+            logger.info("VAD(%s): idle timeout (%.1fs)", backend_label, idle_timeout_sec or 0)
             return None
 
-        bytes_per_chunk = int(chunk_samples * 2)  # S16_LE mono
-        cmd = [
-            "arecord",
-            "-q",
-            "-D",
-            dev,
-            "-r",
-            str(sr),
-            "-f",
-            "S16_LE",
-            "-c",
-            "1",
-            "-t",
-            "raw",
-        ]
-        logger.info("VAD kayıt backend=arecord device=%s sr=%s", dev, sr)
+        mono = read_chunk()
+        if mono is None or len(mono) == 0:
+            break
+        total += len(mono)
 
-        audio_parts: list[np.ndarray] = []
-        silence_run = 0
-        speaking = False
-        total = 0
-        t0 = time.perf_counter()
-        t_first_speech: float | None = None
+        prob = vad_prob(mono)
+        is_speech = prob >= thr
 
-        p: subprocess.Popen[bytes] | None = None
-        try:
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            assert p.stdout is not None
+        if is_speech:
+            if not speaking:
+                t_first_speech = time.perf_counter()
+                idle_deadline = None
+            speaking = True
+            silence_run = 0
+            speech_samples += len(mono)
+            audio_parts.append(mono)
+            if on_partial and speech_samples > sr // 2:
+                now = time.monotonic()
+                if now - last_partial_at >= partial_interval:
+                    last_partial_at = now
+                    try:
+                        on_partial(np.concatenate(audio_parts, axis=0))
+                    except Exception as e:
+                        logger.debug("VAD on_partial hatası: %s", e)
+        elif speaking:
+            audio_parts.append(mono)
+            silence_run += len(mono)
+            need = _effective_silence_samples(speech_samples, sr, silence_sec)
+            if silence_run >= need:
+                break
 
-            while total < max_samples:
-                b = p.stdout.read(bytes_per_chunk)
-                if not b or len(b) < bytes_per_chunk:
-                    break
-                mono = np.frombuffer(b, dtype=np.int16).copy()
-                total += len(mono)
-
-                prob = vad_prob(mono)
-                is_speech = prob >= thr
-
-                if is_speech:
-                    if not speaking:
-                        t_first_speech = time.perf_counter()
-                    speaking = True
-                    silence_run = 0
-                    audio_parts.append(mono)
-                elif speaking:
-                    audio_parts.append(mono)
-                    silence_run += len(mono)
-                    if silence_run >= silence_samples:
-                        break
-        except Exception as e:
-            logger.exception("arecord/VAD hatası: %s", e)
-            return None
-        finally:
-            if p is not None:
-                try:
-                    p.terminate()
-                except Exception:
-                    pass
-                try:
-                    p.wait(timeout=1)
-                except Exception:
-                    pass
-
-        t1 = time.perf_counter()
-        if not audio_parts:
-            logger.info("VAD(arecord): konuşma yok (elapsed=%0.1fs, total_samples=%s)", t1 - t0, total)
-            return None
-        out = np.concatenate(audio_parts, axis=0)
-        lead = (t_first_speech - t0) if t_first_speech is not None else -1.0
+    t1 = time.perf_counter()
+    if not audio_parts:
         logger.info(
-            "VAD(arecord): segment çıktı (elapsed=%0.1fs, lead_to_speech=%0.2fs, total_samples=%s, out_samples=%s, out_sec=%0.2f)",
+            "VAD(%s): konuşma yok (elapsed=%0.1fs, total_samples=%s)",
+            backend_label,
             t1 - t0,
-            lead,
             total,
-            len(out),
-            len(out) / float(sr),
         )
-        return out
+        return None
+
+    out = _finalize_segment(audio_parts, sr, speech_samples)
+    if out is None:
+        return None
+    lead = (t_first_speech - t0) if t_first_speech is not None else -1.0
+    logger.info(
+        "VAD(%s): segment (elapsed=%0.1fs, lead=%0.2fs, out_sec=%0.2f, speech_samples=%s)",
+        backend_label,
+        t1 - t0,
+        lead,
+        len(out) / float(sr),
+        speech_samples,
+    )
+    return out
+
+
+def _capture_arecord(
+    sr: int,
+    thr: float,
+    silence_sec: float,
+    max_samples: int,
+    idle_timeout_sec: float | None,
+    on_partial: Callable[[np.ndarray], None] | None,
+) -> Optional[np.ndarray]:
+    dev = config.AUDIO_INPUT_ALSA_DEVICE
+    if not dev:
+        return None
+
+    chunk_samples = 512 if sr == 16000 else 256
+    bytes_per_chunk = int(chunk_samples * 2)
+    cmd = [
+        "arecord",
+        "-q",
+        "-D",
+        dev,
+        "-r",
+        str(sr),
+        "-f",
+        "S16_LE",
+        "-c",
+        "1",
+        "-t",
+        "raw",
+    ]
+    logger.info("VAD kayıt backend=arecord device=%s sr=%s", dev, sr)
+
+    p: subprocess.Popen[bytes] | None = None
+    stdout = None
+    try:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert p.stdout is not None
+        stdout = p.stdout
+
+        def read_chunk() -> Optional[np.ndarray]:
+            b = stdout.read(bytes_per_chunk)  # type: ignore[union-attr]
+            if not b or len(b) < bytes_per_chunk:
+                return None
+            return np.frombuffer(b, dtype=np.int16).copy()
+
+        return _capture_vad_loop(
+            read_chunk,
+            sr=sr,
+            thr=thr,
+            silence_sec=silence_sec,
+            max_samples=max_samples,
+            idle_timeout_sec=idle_timeout_sec,
+            on_partial=on_partial,
+            backend_label="arecord",
+        )
+    except Exception as e:
+        logger.exception("arecord/VAD hatası: %s", e)
+        return None
+    finally:
+        if p is not None:
+            try:
+                p.terminate()
+            except Exception:
+                pass
+            try:
+                p.wait(timeout=1)
+            except Exception:
+                pass
+
+
+def _capture_sounddevice(
+    sr: int,
+    thr: float,
+    silence_sec: float,
+    max_samples: int,
+    idle_timeout_sec: float | None,
+    on_partial: Callable[[np.ndarray], None] | None,
+) -> Optional[np.ndarray]:
+    chunk_samples = 512 if sr == 16000 else 256
+    device = None
+    if config.AUDIO_INPUT_DEVICE:
+        device = (
+            int(config.AUDIO_INPUT_DEVICE)
+            if config.AUDIO_INPUT_DEVICE.isdigit()
+            else config.AUDIO_INPUT_DEVICE
+        )
+    logger.info("VAD kayıt backend=sounddevice device=%r sr=%s", device, sr)
 
     try:
-        if config.AUDIO_INPUT_ALSA_DEVICE:
-            return read_with_arecord()
-
-        device = None
-        if config.AUDIO_INPUT_DEVICE:
-            # sounddevice accepts index (int) or substring name (str)
-            device = int(config.AUDIO_INPUT_DEVICE) if config.AUDIO_INPUT_DEVICE.isdigit() else config.AUDIO_INPUT_DEVICE
-            logger.info("Mikrofon cihazı seçildi (AUDIO_INPUT_DEVICE=%r)", config.AUDIO_INPUT_DEVICE)
-        logger.info("VAD kayıt backend=sounddevice device=%r sr=%s", device, sr)
         with sd.InputStream(
             channels=1,
             samplerate=sr,
@@ -188,46 +273,85 @@ def record_utterance(
             blocksize=chunk_samples,
             device=device,
         ) as stream:
-            t0 = time.perf_counter()
-            t_first_speech: float | None = None
-            while total < max_samples:
+
+            def read_chunk() -> Optional[np.ndarray]:
                 data, _ = stream.read(chunk_samples)
-                mono = data[:, 0].copy()
-                total += len(mono)
+                return data[:, 0].copy()
 
-                prob = vad_prob(mono)
-                is_speech = prob >= thr
-
-                if is_speech:
-                    if not speaking:
-                        t_first_speech = time.perf_counter()
-                    speaking = True
-                    silence_run = 0
-                    audio_parts.append(mono)
-                elif speaking:
-                    audio_parts.append(mono)
-                    silence_run += len(mono)
-                    if silence_run >= silence_samples:
-                        break
+            return _capture_vad_loop(
+                read_chunk,
+                sr=sr,
+                thr=thr,
+                silence_sec=silence_sec,
+                max_samples=max_samples,
+                idle_timeout_sec=idle_timeout_sec,
+                on_partial=on_partial,
+                backend_label="sounddevice",
+            )
     except Exception as e:
         logger.exception("Mikrofon/VAD hatası: %s", e)
         return None
 
-    t1 = time.perf_counter()
-    if not audio_parts:
-        logger.info("VAD(sounddevice): konuşma yok (elapsed=%0.1fs, total_samples=%s)", t1 - t0, total)
-        return None
-    out = np.concatenate(audio_parts, axis=0)
-    lead = (t_first_speech - t0) if t_first_speech is not None else -1.0
-    logger.info(
-        "VAD(sounddevice): segment çıktı (elapsed=%0.1fs, lead_to_speech=%0.2fs, total_samples=%s, out_samples=%s, out_sec=%0.2f)",
-        t1 - t0,
-        lead,
-        total,
-        len(out),
-        len(out) / float(sr),
+
+def _capture_audio(
+    *,
+    sample_rate: int | None = None,
+    vad_threshold: float | None = None,
+    silence_end_sec: float | None = None,
+    max_sec: float | None = None,
+    idle_timeout_sec: float | None = None,
+    on_partial: Callable[[np.ndarray], None] | None = None,
+) -> Optional[np.ndarray]:
+    sr = sample_rate or config.SAMPLE_RATE
+    thr = vad_threshold if vad_threshold is not None else config.VAD_THRESHOLD
+    silence = silence_end_sec if silence_end_sec is not None else config.SILENCE_END_SEC
+    max_dur = max_sec if max_sec is not None else config.MAX_UTTERANCE_SEC
+    max_samples = int(max_dur * sr)
+
+    if config.AUDIO_INPUT_ALSA_DEVICE:
+        return _capture_arecord(sr, thr, silence, max_samples, idle_timeout_sec, on_partial)
+    return _capture_sounddevice(sr, thr, silence, max_samples, idle_timeout_sec, on_partial)
+
+
+def record_utterance(
+    sample_rate: int | None = None,
+    vad_threshold: float | None = None,
+    silence_end_sec: float | None = None,
+    max_sec: float | None = None,
+    on_partial: Callable[[np.ndarray], None] | None = None,
+) -> Optional[np.ndarray]:
+    """Konuşma bitene kadar kayıt; konuşma yoksa None."""
+    return _capture_audio(
+        sample_rate=sample_rate,
+        vad_threshold=vad_threshold,
+        silence_end_sec=silence_end_sec,
+        max_sec=max_sec,
+        idle_timeout_sec=None,
+        on_partial=on_partial,
     )
-    return out
+
+
+def listen_for_speech(
+    timeout_sec: float,
+    *,
+    sample_rate: int | None = None,
+    vad_threshold: float | None = None,
+    silence_end_sec: float | None = None,
+    max_sec: float | None = None,
+    on_partial: Callable[[np.ndarray], None] | None = None,
+) -> Optional[np.ndarray]:
+    """
+    En fazla timeout_sec bekler; konuşma başlarsa segment tamamlanana kadar devam eder.
+    Süre dolunca konuşma yoksa None.
+    """
+    return _capture_audio(
+        sample_rate=sample_rate,
+        vad_threshold=vad_threshold,
+        silence_end_sec=silence_end_sec,
+        max_sec=max_sec,
+        idle_timeout_sec=timeout_sec,
+        on_partial=on_partial,
+    )
 
 
 def save_wav_int16(path, audio: np.ndarray, sample_rate: int | None = None) -> None:

@@ -1,0 +1,34 @@
+{
+  "activate": [
+    "Buradayım kanka, dinliyorum.",
+    "Tamam kanka, buradayım.",
+    "Hazırım, konuşabilirsin."
+  ],
+  "deactivate": [
+    "Görüşürüz kanka.",
+    "Tamam kanka, sonra konuşuruz.",
+    "Hadi görüşürüz."
+  ],
+  "ack": [
+    "Tamam kanka.",
+    "Oldu kanka.",
+    "Hallederim.",
+    "Tamamdır."
+  ],
+  "nudge": [
+    "Kanka orada mısın?",
+    "Bir şey mi düşünüyorsun?",
+    "Devam edebilirsin kanka.",
+    "Sessiz kaldın, her şey yolunda mı?",
+    "Buradayım, istersen konuş."
+  ],
+  "llm_fallback": [
+    "Bir saniye kanka, bağlantı yavaş.",
+    "Dur kanka, bir daha dene.",
+    "Şu an cevap veremiyorum, biraz sonra?"
+  ],
+  "offline_no_key": [
+    "Şu an bağlantı veya anahtar yok kanka.",
+    "İnternet yok galiba kanka."
+  ]
+}

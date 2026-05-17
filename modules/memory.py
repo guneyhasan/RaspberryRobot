@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import random
 import re
 from datetime import date
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any, Optional
 import config
 
 _MAX_CONV_LINES = 20
+_RECENT_PROMPT_LINES = 6
 
 
 def read_profile() -> dict[str, Any]:
@@ -50,11 +52,18 @@ def clear_memories() -> None:
     write_profile(p)
 
 
-def load_offline_responses() -> dict[str, str]:
+def load_offline_responses() -> dict[str, Any]:
     if not config.OFFLINE_RESPONSES_PATH.is_file():
         return {}
     with open(config.OFFLINE_RESPONSES_PATH, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _pick_offline_value(val: Any) -> str:
+    if isinstance(val, list):
+        choices = [str(x).strip() for x in val if str(x).strip()]
+        return random.choice(choices) if choices else ""
+    return str(val).strip()
 
 
 def get_offline_response(user_text: str) -> Optional[str]:
@@ -62,7 +71,8 @@ def get_offline_response(user_text: str) -> Optional[str]:
     data = load_offline_responses()
     for key, val in data.items():
         if key.lower() in t:
-            return val
+            picked = _pick_offline_value(val)
+            return picked or None
     return None
 
 
@@ -77,22 +87,58 @@ def append_conversation_line(role: str, text: str) -> None:
     config.CONVERSATIONS_PATH.write_text("\n".join(keep) + "\n", encoding="utf-8")
 
 
-def recent_conversations_text() -> str:
+def recent_conversations_text(max_lines: int | None = None) -> str:
     if not config.CONVERSATIONS_PATH.is_file():
         return ""
-    return config.CONVERSATIONS_PATH.read_text(encoding="utf-8").strip()
+    text = config.CONVERSATIONS_PATH.read_text(encoding="utf-8").strip()
+    if not text:
+        return ""
+    limit = max_lines if max_lines is not None else _RECENT_PROMPT_LINES
+    lines = text.splitlines()
+    if len(lines) > limit:
+        lines = lines[-limit:]
+    return "\n".join(lines)
+
+
+def recent_chat_messages(max_turns: int = 3) -> list[dict[str, str]]:
+    """
+  last_conversations.txt → OpenAI messages (son N tur).
+  Satır formatı: Kullanıcı: ... / Kanka: ...
+    """
+    if not config.CONVERSATIONS_PATH.is_file():
+        return []
+    lines = config.CONVERSATIONS_PATH.read_text(encoding="utf-8").splitlines()
+    pairs: list[tuple[str, str]] = []
+    pending_user: str | None = None
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("Kullanıcı:"):
+            pending_user = line.split(":", 1)[1].strip()
+        elif line.startswith("Kanka:") and pending_user is not None:
+            assistant = line.split(":", 1)[1].strip()
+            pairs.append((pending_user, assistant))
+            pending_user = None
+    if max_turns > 0 and len(pairs) > max_turns:
+        pairs = pairs[-max_turns:]
+    out: list[dict[str, str]] = []
+    for u, a in pairs:
+        out.append({"role": "user", "content": u})
+        out.append({"role": "assistant", "content": a})
+    return out
 
 
 def build_system_prompt() -> str:
     profile = read_profile()
-    recent = recent_conversations_text()
+    recent = recent_conversations_text(_RECENT_PROMPT_LINES)
     parts = [
         config.BASE_SYSTEM_PROMPT,
         "\n\nKullanıcı profili:\n",
         json.dumps(profile, ensure_ascii=False, indent=2),
     ]
     if recent:
-        parts.extend(["\n\nSon konuşmalar:\n", recent])
+        parts.extend(["\n\nSon konuşmalar (özet):\n", recent])
     return "".join(parts)
 
 
