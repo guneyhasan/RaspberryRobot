@@ -118,6 +118,8 @@ def _transcribe_via_groq(wav_path: Path) -> tuple[str, float]:
         headers={
             "Content-Type": f"multipart/form-data; boundary={boundary}",
             "Authorization": f"Bearer {api_key}",
+            "User-Agent": "python-requests/2.31.0",
+            "Accept": "application/json",
         },
     )
     to = float(getattr(config, "GROQ_STT_TIMEOUT_SEC", 15.0))
