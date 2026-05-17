@@ -257,32 +257,56 @@ def route_intents(text: str) -> str | None:
             return "Şu an pil seviyesini okuyamadım kanka."
         return f"Kanka şarjım yüzde {r.percent}. Voltajım da {r.voltage:.2f} volt."
 
-    if any(
-        p in low
-        for p in (
-            "gözlerini kapat",
-            "gozlerini kapat",
-            "gözlerini kapa",
-            "gozlerini kapa",
-        )
-    ):
+    # ── Kamera kapat ────────────────────────────────────────────────────────
+    camera_close_triggers = (
+        "gözlerini kapat",
+        "gozlerini kapat",
+        "gözlerini kapa",
+        "gozlerini kapa",
+        "kanka gözlerini kapat",
+        "kanka gozlerini kapat",
+    )
+    if any(p in low for p in camera_close_triggers):
         camera.set_camera_enabled(False)
         return "Gözlerimi kapattım kanka."
 
-    if any(p in low for p in ("gözlerini aç", "gozlerini ac", "gözlerini ac")):
+    # ── Kamera aç ───────────────────────────────────────────────────────────
+    camera_open_triggers = (
+        "gözlerini aç",
+        "gozlerini ac",
+        "kanka gözlerini aç",
+        "kanka gozlerini ac",
+        "gözlerin aç",
+        "gozlerin ac",
+    )
+    if any(p in low for p in camera_open_triggers):
         camera.set_camera_enabled(True)
-        return "Gözlerimi açtım kanka."
+        return "Gözlerimi açtım kanka, görüyorum artık."
 
+    # ── Vision: bak / ne var / ne görüyorsun ────────────────────────────────
     vision_triggers = (
+        "ne görüyorsun",
+        "ne goruyorsun",
+        "burada ne var",
+        "orada ne var",
         "önümde ne var",
         "onumde ne var",
+        "etrafta ne var",
+        "çevrede ne var",
+        "cevrede ne var",
+        "ne var önünde",
+        "ne var onunde",
         "önümde ne görüyorsun",
         "onumde ne goruyorsun",
-        "etrafta ne var",
     )
-    if low in ("bak", "bak.") or any(t in low for t in vision_triggers):
+    is_vision_cmd = low in ("bak", "bak.") or any(t in low for t in vision_triggers)
+    if is_vision_cmd:
         if not config.OPENAI_API_KEY:
-            return "Görmem için API anahtarı lazım kanka."
+            return "Görmem için OpenAI anahtarı lazım kanka."
+        # Kamera kapalıysa önce aç
+        if not camera.is_camera_enabled():
+            camera.set_camera_enabled(True)
+            logger.info("Vision komutu: kamera otomatik açıldı")
         try:
             if camera.camera_frozen():
                 logger.warning("Kamera kilit şüphesi — yeniden denenecek.")
@@ -369,6 +393,36 @@ def run_loop() -> None:
         name="battery-monitor",
     )
     batt_th.start()
+
+    # ── Kamera otomatik kapanma izleme thread'i ──────────────────────────────
+    stop_cam = threading.Event()
+    _cam_auto_close_sec = float(getattr(config, "CAMERA_AUTO_CLOSE_MIN", 25)) * 60
+
+    def _camera_watchdog(stop_event: threading.Event) -> None:
+        """Kamera açık ve %cam_auto_close_sec süre vision komutu gelmediyse kapat."""
+        while not stop_event.wait(30):   # her 30 saniyede kontrol
+            if not camera.is_camera_enabled():
+                continue
+            if camera.seconds_since_opened() >= _cam_auto_close_sec:
+                logger.info("CAMERA: %d dk doldu, otomatik kapanıyor", int(_cam_auto_close_sec // 60))
+                camera.set_camera_enabled(False)
+                _log_line("CAMERA", f"auto_close | {int(_cam_auto_close_sec // 60)}dk doldu")
+                if not tts.is_speaking():
+                    try:
+                        tts.speak(
+                            f"Kanka {int(_cam_auto_close_sec // 60)} dakikadır kimse bakmadı, gözlerimi kapattım.",
+                            prefer_online=False,
+                        )
+                    except Exception as e:
+                        logger.warning("Kamera kapanma bildirimi TTS hatası: %s", e)
+
+    cam_th = threading.Thread(
+        target=_camera_watchdog,
+        args=(stop_cam,),
+        daemon=True,
+        name="camera-watchdog",
+    )
+    cam_th.start()
 
     seq = 0
     conversation_mode = False
@@ -541,6 +595,7 @@ def run_loop() -> None:
         except KeyboardInterrupt:
             logger.info("Kullanıcı durdurdu.")
             stop_batt.set()
+            stop_cam.set()
             motion.safe_stop("keyboard_interrupt")
             break
         except Exception:

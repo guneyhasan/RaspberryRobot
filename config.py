@@ -356,4 +356,7 @@ Kanka modu örneği:
 "Kanka buradayım. Yanındayım. Çay koyayım mı? Biraz gülmek ister misin? Bugün dünyayı kurtarmıyoruz, tamam mı?"
 """
 
+# Kamera: komut olmaksızın bu süre (dakika) açık kalırsa otomatik kapat
+CAMERA_AUTO_CLOSE_MIN = float(os.getenv("CAMERA_AUTO_CLOSE_MIN", "25"))
+
 STARTUP_PHRASE = os.getenv("STARTUP_PHRASE", "Hazırım Cihan.")

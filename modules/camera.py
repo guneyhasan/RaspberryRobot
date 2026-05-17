@@ -17,14 +17,38 @@ import config
 
 logger = logging.getLogger(__name__)
 
-_camera_enabled = True
+_camera_enabled = False   # Başlangıçta kapalı; "gözlerini aç" komutu ile açılır
 _last_capture_ts = 0.0
+_camera_open_ts: float = 0.0    # Kamera en son ne zaman açıldı
+_last_vision_ts: float = 0.0    # En son "bak/ne görüyorsun" komutu ne zaman işlendi
 
 
 def set_camera_enabled(on: bool) -> None:
-    global _camera_enabled
+    global _camera_enabled, _camera_open_ts
     _camera_enabled = on
+    if on:
+        _camera_open_ts = time.time()
     logger.info("Kamera %s", "açık" if on else "kapalı")
+
+
+def seconds_since_opened() -> float:
+    """Kamera şu an açıksa açılalı kaç saniye geçti."""
+    if not _camera_enabled or _camera_open_ts <= 0:
+        return 0.0
+    return time.time() - _camera_open_ts
+
+
+def record_vision_event() -> None:
+    """Her başarılı görüntü yorumlamasından sonra çağrılır."""
+    global _last_vision_ts
+    _last_vision_ts = time.time()
+
+
+def seconds_since_last_vision() -> float:
+    """Son vision komutundan bu yana kaç saniye geçti (hiç yoksa inf)."""
+    if _last_vision_ts <= 0:
+        return float("inf")
+    return time.time() - _last_vision_ts
 
 
 def is_camera_enabled() -> bool:
@@ -112,6 +136,7 @@ def look_and_describe(prompt: str | None = None) -> str:
             max_tokens=300,
         )
         llm_mod.bump_request_count()
+        record_vision_event()   # zamanlayıcıyı sıfırla
         return (resp.choices[0].message.content or "").strip()
     finally:
         img_path.unlink(missing_ok=True)
