@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 _client: Optional[OpenAI] = None
 _groq_client = None
 
-_SENTENCE_SPLIT = re.compile(r"(?<=[.!?…])\s+")
+# Cümle/parça sonu: noktalama + boşluk VEYA virgül + boşluk (min karakter kontrolü ile)
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?…])\s+|(?<=,)\s+")
 
 
 def _get_client() -> OpenAI:

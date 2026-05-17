@@ -120,11 +120,97 @@ def _find_piper_model() -> tuple[Path, Optional[Path]]:
     return model, json_path if json_path and json_path.is_file() else None
 
 
+def _piper_sample_rate() -> int:
+    """Piper model JSON'dan sample rate oku (varsayılan 22050)."""
+    try:
+        _, json_path = _find_piper_model()
+        if json_path and json_path.is_file():
+            import json as _json
+            data = _json.loads(json_path.read_text(encoding="utf-8"))
+            return int(data.get("audio", {}).get("sample_rate", 22050))
+    except Exception:
+        pass
+    return 22050
+
+
+def _speak_piper_streaming(text: str) -> float:
+    """
+    Piper --output-raw → aplay doğrudan boru hattı.
+    Sentez başlar başlamaz ses çalmaya başlar; geçici WAV dosyası yazmaz.
+    WAV-dosyası yöntemine göre ~0.5–1s daha erken ses duyulur.
+    """
+    model, json_path = _find_piper_model()
+    sr = _piper_sample_rate()
+
+    cmd_piper = [config.PIPER_BINARY, "--model", str(model), "--output-raw"]
+    if json_path and json_path.is_file():
+        cmd_piper.extend(["--config", str(json_path)])
+
+    cmd_aplay = ["aplay", "-q", "-r", str(sr), "-f", "S16_LE", "-c", "1"]
+    if config.AUDIO_OUTPUT_ALSA_DEVICE:
+        cmd_aplay.extend(["-D", config.AUDIO_OUTPUT_ALSA_DEVICE])
+
+    t0 = time.perf_counter()
+    p_piper: subprocess.Popen | None = None
+    p_aplay: subprocess.Popen | None = None
+    try:
+        p_piper = subprocess.Popen(
+            cmd_piper,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        p_aplay = subprocess.Popen(
+            cmd_aplay,
+            stdin=p_piper.stdout,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        # Parent'ın read-end referansını kapat; aplay sahiplensin, EOF doğru gelsin.
+        assert p_piper.stdout is not None
+        p_piper.stdout.close()
+
+        assert p_piper.stdin is not None
+        p_piper.stdin.write(text.encode("utf-8"))
+        p_piper.stdin.close()
+
+        rc_piper = p_piper.wait(timeout=30)
+        p_aplay.wait(timeout=30)
+
+        if rc_piper != 0:
+            stderr_b = b""
+            if p_piper.stderr:
+                try:
+                    stderr_b = p_piper.stderr.read(800)
+                except Exception:
+                    pass
+            err = stderr_b.decode("utf-8", errors="replace")
+            raise RuntimeError(f"Piper streaming hatası (rc={rc_piper}): {err[:300]}")
+    except subprocess.TimeoutExpired:
+        for p in (p_piper, p_aplay):
+            if p is not None:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+        raise RuntimeError("Piper streaming timeout")
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        for p in (p_piper, p_aplay):
+            if p is not None:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+        raise RuntimeError(f"Piper streaming genel hata: {exc}") from exc
+
+    return time.perf_counter() - t0
+
+
 def synthesize_piper_to_wav_file(text: str) -> Path:
     """
-    Piper çıktısını bir WAV dosyasına yazar.
-    Not: Piper pipe kullanımında genelde `--output-raw` gerekir; burada `--output_file` ile
-    dosya üreterek oynatmayı stabil hale getiriyoruz.
+    Piper çıktısını bir WAV dosyasına yazar (yedek yol; normalde streaming kullanılır).
     """
     model, json_path = _find_piper_model()
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
@@ -167,32 +253,43 @@ def speak(text: str, prefer_online: bool = True) -> tuple[str, float]:
 
 
 def _speak_inner(text: str, prefer_online: bool, t0: float) -> tuple[str, float]:
-    used = "piper"
-    if prefer_online and internet_available() and config.OPENAI_API_KEY:
-        audio = synthesize_openai_tts(text)
-        used = f"openai-{config.TTS_VOICE}"
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-            f.write(audio)
-            mp3 = Path(f.name)
-        wav_path = mp3.with_suffix(".wav")
+    # Online TTS: yalnızca anahtar VE internet varsa dene (kısa devre: anahtar yoksa hiç bakma)
+    if prefer_online and config.OPENAI_API_KEY and internet_available():
         try:
-            subprocess.run(
-                ["ffmpeg", "-y", "-i", str(mp3), str(wav_path), "-loglevel", "error"],
-                check=True,
-                capture_output=True,
-            )
-            play_audio_file(wav_path)
-        finally:
-            mp3.unlink(missing_ok=True)
-            wav_path.unlink(missing_ok=True)
-    else:
+            audio = synthesize_openai_tts(text)
+            used = f"openai-{config.TTS_VOICE}"
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+                f.write(audio)
+                mp3 = Path(f.name)
+            wav_path = mp3.with_suffix(".wav")
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", str(mp3), str(wav_path), "-loglevel", "error"],
+                    check=True,
+                    capture_output=True,
+                )
+                play_audio_file(wav_path)
+            finally:
+                mp3.unlink(missing_ok=True)
+                wav_path.unlink(missing_ok=True)
+            duration = time.perf_counter() - t0
+            return used, duration
+        except Exception as e:
+            logger.warning("Online TTS başarısız, Piper streaming'e geçiliyor: %s", e)
+
+    # Piper streaming: --output-raw | aplay (dosyasız, ses daha erken başlar)
+    try:
+        duration = _speak_piper_streaming(text)
+        return "piper", duration
+    except Exception as e:
+        logger.warning("Piper streaming başarısız, WAV dosyası yöntemine geçiliyor: %s", e)
         wav_path = synthesize_piper_to_wav_file(text)
         try:
             play_audio_file(wav_path)
         finally:
             wav_path.unlink(missing_ok=True)
-    duration = time.perf_counter() - t0
-    return used, duration
+        duration = time.perf_counter() - t0
+        return "piper", duration
 
 
 def speak_sentences(
