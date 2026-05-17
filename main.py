@@ -173,23 +173,38 @@ def route_intents(text: str) -> str | None:
         return phrases.pick("ack") + " Durdum."
 
     # Basit yön komutları: ileri/geri/sağ/sol
+    # Hareket triggerları: yalnızca hareket kastı açık olan ifadeler.
+    # Kısa / belirsiz kelimeler ("kaç", "ileri", "sol" gibi) çıkarıldı —
+    # bunlar günlük cümlelerde sık geçer ve yanlış tetikler.
     forward_triggers = (
         "ileri git",
-        "ileri",
-        "yürü",
-        "yuru",
+        "yürü bakalım",
+        "yürü kanka",
         "gaza bas",
-        "devam et",
+        "devam et kanka",
+        "ilerle",
     )
     backward_triggers = (
         "geri gel",
         "geri git",
-        "geri",
-        "kaç",
-        "kac",
+        "geri geri",
+        "geri dön",
+        "geri kanka",
     )
-    left_triggers = ("sola dön", "sola don", "sol", "sola")
-    right_triggers = ("sağa dön", "saga dön", "saga don", "sağa don", "sağ", "sag", "sağa", "saga")
+    left_triggers = (
+        "sola dön",
+        "sola don",
+        "sola git",
+        "sola kanka",
+    )
+    right_triggers = (
+        "sağa dön",
+        "saga don",
+        "sağa git",
+        "saga git",
+        "sağa kanka",
+        "saga kanka",
+    )
 
     move_sec = float(getattr(config, "DEFAULT_MOVE_SECONDS", 1.0))
     throttle = int(getattr(config, "DEFAULT_DRIVE_THROTTLE", 55))
