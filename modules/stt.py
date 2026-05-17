@@ -66,6 +66,90 @@ def _uses_server() -> bool:
     return getattr(config, "WHISPER_STT_BACKEND", "cli") == "server"
 
 
+def _uses_groq() -> bool:
+    return getattr(config, "WHISPER_STT_BACKEND", "cli") == "groq"
+
+
+def _transcribe_via_groq(wav_path: Path) -> tuple[str, float]:
+    """Groq Whisper API ile hızlı bulut STT (~0.2–0.4s, yerel yerine)."""
+    api_key = getattr(config, "GROQ_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("GROQ_API_KEY ayarlı değil — Groq STT kullanılamaz")
+
+    model = getattr(config, "GROQ_STT_MODEL", "whisper-large-v3-turbo")
+    url = "https://api.groq.com/openai/v1/audio/transcriptions"
+
+    with open(wav_path, "rb") as f:
+        wav_data = f.read()
+
+    boundary = f"----grqSTT{uuid.uuid4().hex}"
+    crlf = b"\r\n"
+    parts: list[bytes] = []
+
+    def _field(name: str, value: str) -> None:
+        parts.append(f"--{boundary}".encode() + crlf)
+        parts.append(f'Content-Disposition: form-data; name="{name}"'.encode() + crlf + crlf)
+        parts.append(value.encode("utf-8") + crlf)
+
+    parts.append(f"--{boundary}".encode() + crlf)
+    parts.append(b'Content-Disposition: form-data; name="file"; filename="audio.wav"' + crlf)
+    parts.append(b"Content-Type: audio/wav" + crlf + crlf)
+    parts.append(wav_data + crlf)
+
+    _field("model", model)
+    _field("language", "tr")
+    _field("response_format", "json")
+
+    # Dialog bağlamı prompt olarak gönder (Whisper'ı doğrulama için)
+    if getattr(config, "WHISPER_STT_DIALOG_HINT", True):
+        with _dialog_lock:
+            tail = _dialog_prompt_tail.strip()
+        if tail:
+            mx = max(32, int(getattr(config, "WHISPER_STT_PROMPT_MAX_CHARS", 200)))
+            _field("prompt", tail[:mx])
+
+    parts.append(f"--{boundary}--".encode() + crlf)
+    body = b"".join(parts)
+
+    req = Request(
+        url,
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Authorization": f"Bearer {api_key}",
+        },
+    )
+    to = float(getattr(config, "GROQ_STT_TIMEOUT_SEC", 15.0))
+    try:
+        with urlopen(req, timeout=to) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except HTTPError as e:
+        err_body = ""
+        try:
+            err_body = e.read().decode("utf-8", errors="replace")[:800]
+        except Exception:
+            pass
+        logger.error("Groq STT HTTP %s: %s", e.code, err_body)
+        raise RuntimeError(f"Groq STT HTTP {e.code}: {err_body}") from e
+    except URLError as e:
+        logger.error("Groq STT bağlantı hatası: %s", e)
+        raise RuntimeError(f"Groq STT erişilemedi: {e}") from e
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        logger.error("Groq STT JSON parse: %s | body=%s", e, raw[:400])
+        raise RuntimeError("Groq STT geçersiz JSON") from e
+
+    if isinstance(data, dict) and data.get("error"):
+        raise RuntimeError(f"Groq STT: {data['error']}")
+
+    text = (data.get("text") or "").strip() if isinstance(data, dict) else ""
+    conf = 0.94 if text else 0.0
+    return text, conf
+
+
 def _server_base() -> str:
     return getattr(config, "WHISPER_SERVER_BASE_URL", "http://127.0.0.1:8777").rstrip("/")
 
@@ -158,6 +242,9 @@ def _start_managed_server_locked() -> None:
 
 def ensure_whisper_backend_ready() -> None:
     """Uygulama açılışında veya ilk STT öncesi: server modunda süreç + model yüklemesi."""
+    if _uses_groq():
+        logger.info("STT: backend=groq (Groq Whisper API) — yerel sunucu başlatılmıyor")
+        return
     if not _uses_server():
         return
     with _server_lock:
@@ -313,10 +400,22 @@ def transcribe_pcm_cli(pcm_int16: np.ndarray, sample_rate: int | None = None) ->
 
 def transcribe_pcm(pcm_int16: np.ndarray, sample_rate: int | None = None) -> tuple[str, float]:
     """
-    whisper-server (kalıcı model) veya whisper-cli.
+    Groq Whisper API (hızlı, bulut), whisper-server (kalıcı model) veya whisper-cli.
     """
     global _server_proc
     sr = sample_rate or config.SAMPLE_RATE
+
+    # ── Groq Whisper API (en hızlı seçenek) ────────────────────────────────
+    if _uses_groq():
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            wav_path = Path(f.name)
+        try:
+            vad.save_wav_int16(wav_path, pcm_int16, sr)
+            return _transcribe_via_groq(wav_path)
+        finally:
+            wav_path.unlink(missing_ok=True)
+
+    # ── Yerel whisper-server / whisper-cli ──────────────────────────────────
     if not config.WHISPER_MODEL.is_file():
         raise FileNotFoundError(f"Whisper model yok: {config.WHISPER_MODEL}")
 
