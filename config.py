@@ -301,6 +301,10 @@ LLM_PROVIDER = _env_str("LLM_PROVIDER", "").lower()
 GROQ_STT_MODEL = _env_str("GROQ_STT_MODEL", "whisper-large-v3-turbo")
 GROQ_STT_TIMEOUT_SEC = float(os.getenv("GROQ_STT_TIMEOUT_SEC", "15.0"))
 
+# Groq vision modeli (görüntü yorumlama)
+# llama-4-scout hızlı ve ücretsiz tier'da çalışır
+GROQ_VISION_MODEL = _env_str("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+
 MAX_DAILY_REQUESTS = int(os.getenv("MAX_DAILY_REQUESTS", "500"))
 REQUEST_COUNTER_FILE = LOGS_DIR / "daily_request_count.txt"
 

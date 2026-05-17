@@ -109,8 +109,22 @@ def camera_frozen() -> bool:
     return (time.time() - _last_capture_ts) > 300 and _camera_enabled
 
 
+def _vision_messages(b64: str, user_prompt: str) -> list:
+    return [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": user_prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+            ],
+        }
+    ]
+
+
 def look_and_describe(prompt: str | None = None) -> str:
-    """Fotoğraf çek ve vision modeli ile Türkçe kısa açıklama."""
+    """Fotoğraf çek ve vision modeli ile Türkçe kısa açıklama.
+    Önce Groq vision, yoksa OpenAI vision kullanılır.
+    """
     from modules import llm as llm_mod
 
     llm_mod.ensure_daily_quota()
@@ -118,25 +132,42 @@ def look_and_describe(prompt: str | None = None) -> str:
     try:
         data = img_path.read_bytes()
         b64 = base64.standard_b64encode(data).decode("ascii")
-        mime = "image/jpeg"
-        url = f"data:{mime};base64,{b64}"
-        client = OpenAI(api_key=config.OPENAI_API_KEY, timeout=config.TIMEOUT_SECONDS)
-        user_prompt = prompt or "Bu fotoğrafta ne var? Türkçe kısa açıkla."
-        resp = client.chat.completions.create(
-            model=config.VISION_MODEL,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_prompt},
-                        {"type": "image_url", "image_url": {"url": url}},
-                    ],
-                }
-            ],
-            max_tokens=300,
-        )
-        llm_mod.bump_request_count()
-        record_vision_event()   # zamanlayıcıyı sıfırla
-        return (resp.choices[0].message.content or "").strip()
+        user_prompt = prompt or "Bu fotoğrafta ne var? Türkçe, 1-2 kısa cümleyle açıkla."
+        messages = _vision_messages(b64, user_prompt)
+
+        # ── Groq vision (önce dene) ──────────────────────────────────────────
+        if config.GROQ_API_KEY:
+            try:
+                from groq import Groq
+                groq_vision_model = getattr(config, "GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+                client_groq = Groq(api_key=config.GROQ_API_KEY)
+                resp = client_groq.chat.completions.create(
+                    model=groq_vision_model,
+                    messages=messages,
+                    max_tokens=300,
+                )
+                text = (resp.choices[0].message.content or "").strip()
+                if text:
+                    llm_mod.bump_request_count()
+                    record_vision_event()
+                    logger.info("Vision: Groq (%s) kullanıldı", groq_vision_model)
+                    return text
+            except Exception as e:
+                logger.warning("Groq vision başarısız, OpenAI'ye geçiliyor: %s", e)
+
+        # ── OpenAI vision (yedek) ────────────────────────────────────────────
+        if config.OPENAI_API_KEY:
+            client_oai = OpenAI(api_key=config.OPENAI_API_KEY, timeout=config.TIMEOUT_SECONDS)
+            resp = client_oai.chat.completions.create(
+                model=config.VISION_MODEL,
+                messages=messages,
+                max_tokens=300,
+            )
+            llm_mod.bump_request_count()
+            record_vision_event()
+            logger.info("Vision: OpenAI (%s) kullanıldı", config.VISION_MODEL)
+            return (resp.choices[0].message.content or "").strip()
+
+        raise RuntimeError("Vision için ne Groq ne de OpenAI anahtarı var.")
     finally:
         img_path.unlink(missing_ok=True)

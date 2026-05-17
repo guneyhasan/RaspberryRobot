@@ -301,8 +301,8 @@ def route_intents(text: str) -> str | None:
     )
     is_vision_cmd = low in ("bak", "bak.") or any(t in low for t in vision_triggers)
     if is_vision_cmd:
-        if not config.OPENAI_API_KEY:
-            return "Görmem için OpenAI anahtarı lazım kanka."
+        if not config.OPENAI_API_KEY and not config.GROQ_API_KEY:
+            return "Görmem için en az bir API anahtarı lazım kanka."
         # Kamera kapalıysa önce aç
         if not camera.is_camera_enabled():
             camera.set_camera_enabled(True)
