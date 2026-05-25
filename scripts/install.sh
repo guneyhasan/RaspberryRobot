@@ -36,33 +36,16 @@ if [[ -f "${ROBOT_HAT_DIR}/i2samp.sh" ]]; then
   (cd "${ROBOT_HAT_DIR}" && sudo bash i2samp.sh) || true
 fi
 
-echo "[install] ALSA (.asoundrc) ayarlanıyor..."
-cat > "${HOME}/.asoundrc" <<'EOF'
-pcm.hb {
-    type plug
-    slave.pcm "hw:CARD=sndrpihifiberry,DEV=0"
-}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-ctl.hb {
-    type hw
-    card sndrpihifiberry
-}
-EOF
+echo "[install] ALSA (.asoundrc) ayarlanıyor..."
+bash "${SCRIPT_DIR}/setup_alsa_hifiberry.sh"
 
 pkill -f speaker-test 2>/dev/null || true
 pkill -f aplay 2>/dev/null || true
 
-if command -v speaker-test >/dev/null 2>&1; then
-  echo "[install] speaker-test (hb) kısa test..."
-  speaker-test -D hb -c 2 -t sine -l 1 || true
-else
-  echo "[install] speaker-test yok, ses testi atlandı."
-fi
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "$ROOT"
-
 echo "[install] Sistem paketleri (sudo gerekir)..."
 sudo apt-get update -y
 sudo apt-get install -y \
