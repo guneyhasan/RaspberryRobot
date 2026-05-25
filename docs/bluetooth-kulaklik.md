@@ -52,8 +52,10 @@ trust AA:BB:CC:DD:EE:FF
 
 | Komut | Sonuç |
 |-------|--------|
-| kanka bluetooth kulaklık modunu aç | BT aç, cihazları numarala ve sesli oku |
-| kanka 2 numaraya bağlan | 2. cihaza bağlan, ses kulaklıktan |
+| kanka bluetooth kulaklık modunu aç | Eşleşmiş varsa otomatik bağlan; yoksa tara ve listele |
+| kanka 2 numaraya bağlan | 2. cihaza bağlan (gerekirse eşleştirir) |
+| kanka 2 numaraya eşleştir | 2. cihazı pair + bağlan |
+| yeniden tara / tekrar tara | Yakındaki cihazları yeniden listele |
 | kanka bluetooth kulaklık modunu kapat | Hoparlöre dön, BT kapat |
 
 `hey kanka` ile konuşma modu açıkken ekstra wake gerekmez.

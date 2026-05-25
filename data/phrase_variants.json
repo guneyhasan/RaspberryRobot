@@ -78,5 +78,29 @@
   "bt_error_connect": [
     "Bağlanamadım kanka, bir daha dene.",
     "Kulaklığa bağlanırken sorun oldu kanka."
+  ],
+  "bt_auto_connected": [
+    "Eşleşmiş kulaklığa bağlandım kanka, ses kulaklıktan geliyor.",
+    "Tamam kanka, kayıtlı kulaklığa bağlandım."
+  ],
+  "bt_paired_list_intro": [
+    "Eşleşmiş cihazların kanka:",
+    "Daha önce eşleştirdiğin cihazlar bunlar kanka:"
+  ],
+  "bt_scan_list_intro": [
+    "Yakındaki bluetooth cihazları kanka:",
+    "Tarama yaptım, şunları buldum kanka:"
+  ],
+  "bt_await_pair_or_connect": [
+    "Numara söyle kanka. Bağlanmak için örneğin bir numaraya bağlan. İlk kez eşleştirmek için iki numaraya eşleştir.",
+    "Hangi numara kanka? Bağlan veya eşleştir de."
+  ],
+  "bt_rescan_ok": [
+    "Tamam kanka, yeniden taradım.",
+    "Bir daha taradım kanka."
+  ],
+  "bt_error_pair": [
+    "Eşleştiremedim kanka, kulaklık eşleştirme modunda mı?",
+    "Pair olmadı kanka, bir daha dene."
   ]
 }
