@@ -70,15 +70,10 @@ sudo apt-get install -y \
   libportaudio2 portaudio19-dev \
   ffmpeg \
   cmake build-essential \
-  bluez bluez-tools bluealsa
+  bluez bluez-tools
 
-RUN_USER="${SUDO_USER:-$USER}"
-if [[ -n "${RUN_USER}" && "${RUN_USER}" != "root" ]] && id "${RUN_USER}" &>/dev/null; then
-  sudo usermod -aG bluetooth "${RUN_USER}" 2>/dev/null || true
-fi
-sudo systemctl enable bluealsa.service 2>/dev/null || true
-sudo systemctl start bluealsa.service 2>/dev/null || true
-echo "[install] Bluetooth: bash scripts/setup_bluetooth_audio.sh (PipeWire notu için)"
+echo "[install] BlueALSA (kulaklık sesi) — ayrı script, paket adı OS'e göre değişir..."
+bash "${SCRIPT_DIR}/setup_bluetooth_audio.sh" || echo "[install] BlueALSA kurulamadı; docs/bluetooth-kulaklik.md"
 
 if [[ ! -d "$ROOT/venv" ]]; then
   python3 -m venv "$ROOT/venv"

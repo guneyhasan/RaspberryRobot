@@ -8,6 +8,27 @@ bash scripts/setup_bluetooth_audio.sh
 bash scripts/install.sh
 ```
 
+### `Package 'bluealsa' has no installation candidate`
+
+Bu hata **sorun çıkarır**: Robot Kanka kulaklığa sesi `aplay -D bluealsa:DEV=...` ile verir; BlueALSA yoksa bağlansanız bile TTS kulaklıktan duyulmaz.
+
+| Pi OS / Debian | Durum |
+|----------------|--------|
+| **11 Bullseye** | `bluealsa` ve `bluez-alsa-utils` çoğu repoda **yok** |
+| **12 Bookworm** | Paket adı genelde **`bluez-alsa-utils`** (`apt install bluez-alsa-utils`) |
+| **13+** | `bluez-alsa-utils` veya `bluealsa` |
+
+Deneyin:
+
+```bash
+sudo apt update
+sudo apt install bluez bluez-tools bluez-alsa-utils
+sudo systemctl enable --now bluealsa
+bluealsa-aplay -L
+```
+
+Bullseye'de kalmak zorundaysanız: OS'yi Bookworm'a yükseltin veya [bluez-alsa](https://github.com/arkq/bluez-alsa) kaynağından derleyin.
+
 `.env` içinde:
 
 ```
