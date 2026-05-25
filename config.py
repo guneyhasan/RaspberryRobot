@@ -226,6 +226,11 @@ AUDIO_INPUT_DEVICE = _env_str("AUDIO_INPUT_DEVICE", "")
 # If set, VAD will read audio via `arecord` instead of PortAudio/sounddevice.
 AUDIO_INPUT_ALSA_DEVICE = _env_str("AUDIO_INPUT_ALSA_DEVICE", "")
 
+# Ana döngü: konuşma başlaması için bekleme (saniye). arecord anında kapanırsa yine hızlı SKIP olur.
+LISTEN_WAIT_SEC = float(os.getenv("LISTEN_WAIT_SEC", "30"))
+# Mikrofon/arecord hatasında CPU döngüsünü önlemek için kısa bekleme (saniye).
+LISTEN_FAST_FAIL_BACKOFF_SEC = float(os.getenv("LISTEN_FAST_FAIL_BACKOFF_SEC", "0.35"))
+
 # ALSA output device override (aplay -D). Example: "hb" (from ~/.asoundrc) or "plughw:0,0"
 # If empty, `aplay` uses the default ALSA device.
 AUDIO_OUTPUT_ALSA_DEVICE = _env_str("AUDIO_OUTPUT_ALSA_DEVICE", "hb")

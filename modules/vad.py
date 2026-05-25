@@ -179,6 +179,16 @@ def _capture_vad_loop(
     return out
 
 
+def _read_subprocess_stderr(proc: subprocess.Popen[bytes], limit: int = 800) -> str:
+    if proc.stderr is None:
+        return ""
+    try:
+        raw = proc.stderr.read(limit)
+        return raw.decode("utf-8", errors="replace").strip()
+    except Exception:
+        return ""
+
+
 def _capture_arecord(
     sr: int,
     thr: float,
@@ -211,16 +221,37 @@ def _capture_arecord(
 
     p: subprocess.Popen[bytes] | None = None
     stdout = None
+    arecord_failed = False
     try:
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         assert p.stdout is not None
         stdout = p.stdout
+        time.sleep(0.08)
+        if p.poll() is not None:
+            err = _read_subprocess_stderr(p)
+            logger.error(
+                "arecord hemen kapandı (device=%s). arecord -l ile kart numarasını kontrol edin. stderr: %s",
+                dev,
+                err or "(boş)",
+            )
+            return None
 
         def read_chunk() -> Optional[np.ndarray]:
-            b = stdout.read(bytes_per_chunk)  # type: ignore[union-attr]
-            if not b or len(b) < bytes_per_chunk:
+            nonlocal arecord_failed
+            if arecord_failed or p is None:
                 return None
-            return np.frombuffer(b, dtype=np.int16).copy()
+            b = stdout.read(bytes_per_chunk)  # type: ignore[union-attr]
+            if b and len(b) >= bytes_per_chunk:
+                return np.frombuffer(b, dtype=np.int16).copy()
+            if p.poll() is not None:
+                arecord_failed = True
+                err = _read_subprocess_stderr(p)
+                logger.error(
+                    "arecord akışı kesildi (device=%s). Cihaz meşgul veya yanlış olabilir (PipeWire?). stderr: %s",
+                    dev,
+                    err or "(boş)",
+                )
+            return None
 
         return _capture_vad_loop(
             read_chunk,

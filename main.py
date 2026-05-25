@@ -469,7 +469,9 @@ def run_loop() -> None:
                             _log_line("SKIP", f"{tid} | sessizlik (nudge cooldown)")
                         continue
                 else:
-                    text, conf = stt.listen_and_transcribe(
+                    wait_sec = float(getattr(config, "LISTEN_WAIT_SEC", 30))
+                    text, conf = stt.listen_for_speech_and_transcribe(
+                        wait_sec,
                         require_wake=not conversation_mode,
                     )
             except Exception as e:
@@ -478,7 +480,15 @@ def run_loop() -> None:
             t_listen1 = time.perf_counter()
 
             if not text.strip():
-                _log_line("SKIP", f"{tid} | konuşma yok / wake gate geçmedi | listen_total={_fmt_ms(t_listen1 - t_listen0)}")
+                listen_sec = t_listen1 - t_listen0
+                _log_line(
+                    "SKIP",
+                    f"{tid} | konuşma yok / wake gate geçmedi | listen_total={_fmt_ms(listen_sec)}",
+                )
+                # arecord anında kapanınca saniyede yüzlerce SKIP olmasın diye kısa bekleme
+                if listen_sec < 0.25:
+                    backoff = float(getattr(config, "LISTEN_FAST_FAIL_BACKOFF_SEC", 0.35))
+                    time.sleep(backoff)
                 continue
 
             _log_line(
