@@ -60,6 +60,20 @@ trust AA:BB:CC:DD:EE:FF
 
 `hey kanka` ile konuşma modu açıkken ekstra wake gerekmez.
 
+## Tarama boş kalıyorsa
+
+BlueZ 5.66+ `bluetoothctl` içinde `paired-devices` yoktur. Tarama **aynı oturumda** yapılmalı:
+
+```bash
+bluetoothctl
+power on
+scan on
+# 10–15 sn bekle
+devices
+```
+
+Güncel kod tek süreçte `scan on` → bekler → `devices` çalıştırır. Logda `BT tarama: ... merged=6` gibi bir sayı görmelisiniz.
+
 ## Test (Pi)
 
 1. `aplay -D hb` — robot hoparlörü

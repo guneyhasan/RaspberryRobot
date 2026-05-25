@@ -21,6 +21,14 @@ _DEVICE_LINE = re.compile(
     r"^Device\s+([0-9A-Fa-f:]{17})\s+(.+)$",
     re.MULTILINE,
 )
+_NEW_DEVICE_LINE = re.compile(
+    r"\[NEW\]\s+Device\s+([0-9A-Fa-f:]{17})\s+(.+)$",
+    re.MULTILINE,
+)
+_CHG_NAME_LINE = re.compile(
+    r"\[CHG\]\s+Device\s+([0-9A-Fa-f:]{17})\s+Name:\s+(.+)$",
+    re.MULTILINE,
+)
 
 _TURKISH_NUMBERS: dict[str, int] = {
     "bir": 1,
@@ -137,16 +145,20 @@ def _run_bluetoothctl_script(commands: str, timeout: float = 30.0) -> tuple[int,
 
 
 def _parse_devices(output: str) -> list[tuple[str, str]]:
-    seen: set[str] = set()
-    result: list[tuple[str, str]] = []
-    for m in _DEVICE_LINE.finditer(output or ""):
-        mac = m.group(1).upper()
-        name = m.group(2).strip()
-        if mac in seen:
-            continue
-        seen.add(mac)
-        result.append((mac, name))
-    return result
+    """devices / paired list / [NEW] Device satırlarından MAC + ad."""
+    by_mac: dict[str, str] = {}
+
+    for m in _CHG_NAME_LINE.finditer(output or ""):
+        by_mac[m.group(1).upper()] = m.group(2).strip()
+
+    for regex in (_DEVICE_LINE, _NEW_DEVICE_LINE):
+        for m in regex.finditer(output or ""):
+            mac = m.group(1).upper()
+            name = m.group(2).strip()
+            if mac not in by_mac or len(name) > len(by_mac.get(mac, "")):
+                by_mac[mac] = name
+
+    return list(by_mac.items())
 
 
 def _merge_device_lists(*lists: list[tuple[str, str]]) -> list[tuple[str, str]]:
@@ -187,28 +199,91 @@ def ensure_adapter_ready() -> tuple[bool, str]:
     return False, "Bluetooth adaptörü açılamadı kanka."
 
 
+def _bluetoothctl_live_scan(wait_sec: float) -> str:
+    """
+    Tek bluetoothctl sürecinde scan on → bekle → devices.
+    Ayrı süreçlerde scan on + quit taramayı hemen durdurur (BlueZ 5.66+).
+    """
+    wait_sec = max(4.0, wait_sec)
+    proc: subprocess.Popen[str] | None = None
+    try:
+        proc = subprocess.Popen(
+            ["bluetoothctl"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        if proc.stdin is None or proc.stdout is None:
+            return ""
+        for chunk in (_BT_AGENT_SCRIPT, "power on\n", "scan on\n"):
+            proc.stdin.write(chunk)
+            proc.stdin.flush()
+        time.sleep(wait_sec)
+        proc.stdin.write("devices\nscan off\nquit\n")
+        proc.stdin.flush()
+        out, _ = proc.communicate(timeout=wait_sec + 25)
+        logger.debug("BT live scan çıktı uzunluğu: %s", len(out or ""))
+        return out or ""
+    except subprocess.TimeoutExpired:
+        logger.warning("BT live scan zaman aşımı")
+        if proc is not None:
+            proc.kill()
+        return ""
+    except OSError as e:
+        logger.warning("BT live scan hatası: %s", e)
+        return ""
+
+
 def list_paired_devices() -> list[tuple[str, str]]:
-    _, out = _run_bluetoothctl_script(
+    """BlueZ 5.66+: paired-devices yok; menu paired veya devices+info."""
+    _, out_menu = _run_bluetoothctl_script(
+        _BT_AGENT_SCRIPT + "menu paired\nlist\nback\n",
+        timeout=20,
+    )
+    devs = _parse_devices(out_menu)
+    if devs:
+        logger.info("BT paired (menu paired): %s cihaz", len(devs))
+        return devs
+
+    _, out_legacy = _run_bluetoothctl_script(
         _BT_AGENT_SCRIPT + "paired-devices\n",
         timeout=15,
     )
-    return _parse_devices(out)
+    devs = _parse_devices(out_legacy)
+    if devs:
+        logger.info("BT paired (legacy): %s cihaz", len(devs))
+        return devs
+
+    _, out_all = _run_bluetoothctl_script(
+        _BT_AGENT_SCRIPT + "devices\n",
+        timeout=15,
+    )
+    all_devs = _parse_devices(out_all)
+    paired: list[tuple[str, str]] = []
+    for mac, name in all_devs[: int(getattr(config, "BLUETOOTH_MAX_LIST", 8)) * 2]:
+        _, info = _run_bluetoothctl_script(f"info {mac}\n", timeout=10)
+        if "Paired: yes" in info:
+            paired.append((mac, name))
+    logger.info("BT paired (info filter): %s / %s", len(paired), len(all_devs))
+    return paired
 
 
 def scan_devices(timeout_sec: float | None = None) -> list[tuple[str, str]]:
-    """Yakındaki + eşleşmiş cihazları birleştir."""
+    """Yakındaki + eşleşmiş cihazları birleştir (tek oturumda tarama)."""
     timeout_sec = timeout_sec if timeout_sec is not None else float(config.BLUETOOTH_SCAN_SEC)
 
-    _run_bluetoothctl_script(_BT_AGENT_SCRIPT + "power on\n", timeout=10)
-    _run_bluetoothctl_script("scan on\n", timeout=5)
-    time.sleep(max(4.0, timeout_sec))
-    _run_bluetoothctl_script("scan off\n", timeout=10)
-
-    _, out_dev = _run_bluetoothctl_script("devices\n", timeout=15)
-    discovered = _parse_devices(out_dev)
+    out = _bluetoothctl_live_scan(timeout_sec)
+    discovered = _parse_devices(out)
     paired = list_paired_devices()
     merged = _merge_device_lists(paired, discovered)
-    logger.info("BT tarama: paired=%s discovered=%s merged=%s", len(paired), len(discovered), len(merged))
+    logger.info(
+        "BT tarama: paired=%s discovered=%s merged=%s (live_scan=%s)",
+        len(paired),
+        len(discovered),
+        len(merged),
+        len(out),
+    )
     return merged
 
 
