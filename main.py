@@ -351,10 +351,19 @@ def run_loop() -> None:
 
     stt.clear_stt_dialogue_hint()
 
+    tts.set_output_device(None)
+    out_dev = tts.get_output_device() or "(ALSA varsayılan)"
+    logger.info("TTS çıkış cihazı: %s", out_dev)
     try:
-        tts.speak(config.STARTUP_PHRASE, prefer_online=False)
+        kind, duration = tts.speak(config.STARTUP_PHRASE, prefer_online=False)
+        logger.info("Açılış TTS tamam: %s | %.1fs | device=%s", kind, duration, out_dev)
     except Exception as e:
-        logger.warning("Açılış anonsu atlandı: %s", e)
+        logger.error(
+            "Açılış anonsu çalınamadı (device=%s). Test: aplay -l; speaker-test -D hb; "
+            "sudo systemctl start speaker-enable. Hata: %s",
+            out_dev,
+            e,
+        )
 
     # Pil izleme thread'i (Robot-HAT voltajından % hesaplar)
     import threading

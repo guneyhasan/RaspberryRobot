@@ -233,7 +233,8 @@ LISTEN_FAST_FAIL_BACKOFF_SEC = float(os.getenv("LISTEN_FAST_FAIL_BACKOFF_SEC", "
 
 # ALSA output device override (aplay -D). Example: "hb" (from ~/.asoundrc) or "plughw:0,0"
 # If empty, `aplay` uses the default ALSA device.
-AUDIO_OUTPUT_ALSA_DEVICE = _env_str("AUDIO_OUTPUT_ALSA_DEVICE", "hb")
+# Boş = ALSA varsayılanı. Robot-HAT için install.sh ~/.asoundrc pcm.hb → "hb"
+AUDIO_OUTPUT_ALSA_DEVICE = _env_str("AUDIO_OUTPUT_ALSA_DEVICE", "")
 
 # Bluetooth kulaklık modu (bluealsa + bluetoothctl)
 BLUETOOTH_ENABLED = _env_bool("BLUETOOTH_ENABLED", True)

@@ -62,23 +62,39 @@ def internet_available(host: str = "8.8.8.8", port: int = 53, timeout: float = 2
         return False
 
 
-def play_audio_file(path: Path) -> None:
-    path = Path(path)
-    if not path.is_file():
-        raise FileNotFoundError(path)
+def _aplay_cmd_base(*, rate: int | None = None, channels: int = 1, raw: bool = False) -> list[str]:
     cmd = ["aplay", "-q"]
     dev = _effective_output_device()
     if dev:
         cmd.extend(["-D", dev])
-    cmd.append(str(path))
-    r = subprocess.run(
-        cmd,
-        check=True,
-        capture_output=True,
+    if raw and rate is not None:
+        cmd.extend(["-r", str(rate), "-f", "S16_LE", "-c", str(channels)])
+    return cmd
+
+
+def _run_aplay(cmd: list[str], *, context: str = "aplay") -> None:
+    r = subprocess.run(cmd, check=False, capture_output=True)
+    if r.returncode == 0:
+        return
+    err = (r.stderr or b"").decode("utf-8", errors="replace").strip()
+    dev = _effective_output_device() or "(varsayılan)"
+    logger.error(
+        "%s başarısız (rc=%s, device=%s): %s",
+        context,
+        r.returncode,
+        dev,
+        err[-500:] if err else "(stderr boş)",
     )
-    # aplay normalde sessiz; debug için gerektiğinde stderr'i loglamak isteriz
-    if r.stderr:
-        logger.debug("aplay stderr: %s", r.stderr.decode("utf-8", errors="replace")[-500:])
+    raise RuntimeError(f"{context} rc={r.returncode} device={dev}: {err[:200]}")
+
+
+def play_audio_file(path: Path) -> None:
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    cmd = _aplay_cmd_base()
+    cmd.append(str(path))
+    _run_aplay(cmd, context="aplay dosya")
 
 
 def play_audio_wav_bytes(data: bytes) -> None:
@@ -171,10 +187,8 @@ def _speak_piper_streaming(text: str) -> float:
     if json_path and json_path.is_file():
         cmd_piper.extend(["--config", str(json_path)])
 
-    cmd_aplay = ["aplay", "-q", "-r", str(sr), "-f", "S16_LE", "-c", "1"]
-    dev = _effective_output_device()
-    if dev:
-        cmd_aplay.extend(["-D", dev])
+    cmd_aplay = _aplay_cmd_base(rate=sr, channels=1, raw=True)
+    dev = _effective_output_device() or "(varsayılan)"
 
     t0 = time.perf_counter()
     p_piper: subprocess.Popen | None = None
@@ -190,7 +204,7 @@ def _speak_piper_streaming(text: str) -> float:
             cmd_aplay,
             stdin=p_piper.stdout,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         )
         # Parent'ın read-end referansını kapat; aplay sahiplensin, EOF doğru gelsin.
         assert p_piper.stdout is not None
@@ -201,7 +215,7 @@ def _speak_piper_streaming(text: str) -> float:
         p_piper.stdin.close()
 
         rc_piper = p_piper.wait(timeout=30)
-        p_aplay.wait(timeout=30)
+        rc_aplay = p_aplay.wait(timeout=30)
 
         if rc_piper != 0:
             stderr_b = b""
@@ -212,6 +226,18 @@ def _speak_piper_streaming(text: str) -> float:
                     pass
             err = stderr_b.decode("utf-8", errors="replace")
             raise RuntimeError(f"Piper streaming hatası (rc={rc_piper}): {err[:300]}")
+
+        if rc_aplay != 0:
+            err_b = b""
+            if p_aplay.stderr:
+                try:
+                    err_b = p_aplay.stderr.read(800)
+                except Exception:
+                    pass
+            err = err_b.decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"aplay streaming hatası (rc={rc_aplay}, device={dev}): {err[:300]}"
+            )
     except subprocess.TimeoutExpired:
         for p in (p_piper, p_aplay):
             if p is not None:
