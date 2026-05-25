@@ -1,17 +1,18 @@
 [Unit]
 Description=Robot Kanka AI Service
-After=network-online.target bluetooth.target sound.target bluealsa.service
+After=network-online.target bluetooth.target sound.target bluealsa.service speaker-enable.service
 Wants=network-online.target
+Requires=speaker-enable.service
 
 [Service]
 Type=simple
-User=robot
-Group=robot
-WorkingDirectory=/home/robot/kanka
+User=@USER@
+Group=@USER@
+WorkingDirectory=@ROOT@
 Environment=PYTHONUNBUFFERED=1
-EnvironmentFile=-/home/robot/kanka/.env
-ExecStartPre=/home/robot/kanka/scripts/health_check.sh
-ExecStart=/home/robot/kanka/venv/bin/python /home/robot/kanka/main.py
+EnvironmentFile=-@ROOT@/.env
+ExecStartPre=@ROOT@/scripts/health_check.sh
+ExecStart=@ROOT@/venv/bin/python @ROOT@/main.py
 Restart=always
 RestartSec=10
 StartLimitIntervalSec=60

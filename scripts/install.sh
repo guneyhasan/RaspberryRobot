@@ -93,7 +93,27 @@ echo "  $ROOT/models/tr_TR-ahmet-medium/"
 echo ""
 echo "venv: $ROOT/venv"
 echo ".env dosyasını kopyalayın: cp .env.example .env && nano .env"
-echo "systemd: sudo cp systemd/robot-kanka.service /etc/systemd/system/ && sudo systemctl daemon-reload"
 
 chmod +x "$ROOT/scripts/"*.sh 2>/dev/null || true
 chmod +x "$ROOT/scripts/"*.py "$ROOT/main.py" 2>/dev/null || true
+
+echo "[install] systemd — otomatik başlatma (açılışta main.py)..."
+PI_USER="$(whoami)"
+sudo cp "$ROOT/systemd/speaker-enable.service" /etc/systemd/system/
+sudo systemctl enable speaker-enable.service
+sudo systemctl start speaker-enable.service || true
+
+sed -e "s|@USER@|${PI_USER}|g" -e "s|@ROOT@|${ROOT}|g" \
+  "$ROOT/systemd/robot-kanka.service" | sudo tee /etc/systemd/system/robot-kanka.service >/dev/null
+
+if systemctl list-unit-files NetworkManager-wait-online.service &>/dev/null; then
+  sudo systemctl enable NetworkManager-wait-online.service 2>/dev/null || true
+elif systemctl list-unit-files systemd-networkd-wait-online.service &>/dev/null; then
+  sudo systemctl enable systemd-networkd-wait-online.service 2>/dev/null || true
+fi
+
+sudo systemctl daemon-reload
+sudo systemctl enable robot-kanka.service
+echo "[install] Servis kuruldu. Başlat: sudo systemctl start robot-kanka"
+echo "[install] Log: journalctl -u robot-kanka -f  |  /var/log/robot-kanka.log"
+echo "[install] Detay: docs/otomatik-baslatma.md"

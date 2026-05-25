@@ -1,0 +1,11 @@
+[Unit]
+Description=Enable PiCar-X / Robot HAT speaker amplifier (GPIO 20)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/pinctrl set 20 op dh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
