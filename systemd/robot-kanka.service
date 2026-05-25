@@ -1,6 +1,6 @@
 [Unit]
 Description=Robot Kanka AI Service
-After=network-online.target sound.target
+After=network-online.target bluetooth.target sound.target bluealsa.service
 Wants=network-online.target
 
 [Service]

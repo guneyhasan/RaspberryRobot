@@ -18,6 +18,30 @@ logger = logging.getLogger(__name__)
 
 _client: Optional[OpenAI] = None
 _speaking = threading.Event()
+_runtime_output_device: Optional[str] = None
+_output_lock = threading.Lock()
+
+
+def set_output_device(device: str | None) -> None:
+    """Runtime ALSA çıkışı (config üzerine yazar). None = config varsayılanına dön."""
+    global _runtime_output_device
+    with _output_lock:
+        if device is None or not str(device).strip():
+            _runtime_output_device = None
+        else:
+            _runtime_output_device = str(device).strip()
+
+
+def get_output_device() -> str | None:
+    with _output_lock:
+        if _runtime_output_device:
+            return _runtime_output_device
+    base = (config.AUDIO_OUTPUT_ALSA_DEVICE or "").strip()
+    return base or None
+
+
+def _effective_output_device() -> str | None:
+    return get_output_device()
 
 
 def _get_client() -> OpenAI:
@@ -43,8 +67,9 @@ def play_audio_file(path: Path) -> None:
     if not path.is_file():
         raise FileNotFoundError(path)
     cmd = ["aplay", "-q"]
-    if config.AUDIO_OUTPUT_ALSA_DEVICE:
-        cmd.extend(["-D", config.AUDIO_OUTPUT_ALSA_DEVICE])
+    dev = _effective_output_device()
+    if dev:
+        cmd.extend(["-D", dev])
     cmd.append(str(path))
     r = subprocess.run(
         cmd,
@@ -147,8 +172,9 @@ def _speak_piper_streaming(text: str) -> float:
         cmd_piper.extend(["--config", str(json_path)])
 
     cmd_aplay = ["aplay", "-q", "-r", str(sr), "-f", "S16_LE", "-c", "1"]
-    if config.AUDIO_OUTPUT_ALSA_DEVICE:
-        cmd_aplay.extend(["-D", config.AUDIO_OUTPUT_ALSA_DEVICE])
+    dev = _effective_output_device()
+    if dev:
+        cmd_aplay.extend(["-D", dev])
 
     t0 = time.perf_counter()
     p_piper: subprocess.Popen | None = None

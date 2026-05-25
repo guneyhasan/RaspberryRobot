@@ -30,5 +30,53 @@
   "offline_no_key": [
     "Şu an bağlantı veya anahtar yok kanka.",
     "İnternet yok galiba kanka."
+  ],
+  "bt_open": [
+    "Bluetooth kulaklık modunu açtım kanka.",
+    "Tamam kanka, bluetooth açık, cihazlara bakıyorum."
+  ],
+  "bt_list_intro": [
+    "Bağlanabileceğin cihazlar kanka:",
+    "Şunları buldum kanka:"
+  ],
+  "bt_await_number": [
+    "Hangi numaraya bağlanmak istiyorsun kanka?",
+    "Numara söyle kanka, bağlayayım."
+  ],
+  "bt_connected": [
+    "{n} numaraya bağlandım kanka, ses artık kulaklıktan geliyor.",
+    "Tamam kanka, {name} kulaklığına bağlandım."
+  ],
+  "bt_closed": [
+    "Kanka bluetooth kulaklık modunu kapattım, normal hoparlöre döndüm.",
+    "Bluetooth kapalı kanka, ses yine robot hoparlöründen."
+  ],
+  "bt_pair_hint": [
+    "Kulaklığı eşleştirme moduna al kanka. Bir kez bluetoothctl ile eşleştirdikten sonra sesli bağlanırsın.",
+    "İlk seferde eşleştirmen lazım kanka, sonra numara ile bağlarız."
+  ],
+  "bt_error_disabled": [
+    "Bluetooth modu kapalı kanka.",
+    "Bu özellik şu an devre dışı kanka."
+  ],
+  "bt_error_adapter": [
+    "Bluetooth adaptörünü açamadım kanka.",
+    "Adaptör hazır değil kanka."
+  ],
+  "bt_error_no_devices": [
+    "Eşleşmiş cihaz bulamadım kanka.",
+    "Hiç cihaz görünmüyor kanka, taramayı tekrar dene."
+  ],
+  "bt_error_not_active": [
+    "Önce kulaklık modunu aç kanka.",
+    "Bluetooth kulaklık modu açık değil kanka."
+  ],
+  "bt_error_invalid_number": [
+    "Geçersiz numara kanka, listeden bir numara söyle.",
+    "O numara yok kanka, tekrar dinle listeyi."
+  ],
+  "bt_error_connect": [
+    "Bağlanamadım kanka, bir daha dene.",
+    "Kulaklığa bağlanırken sorun oldu kanka."
   ]
 }

@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import config  # noqa: E402
-from modules import battery, camera, head, llm, memory, motion, phrases, stt, tts, wake_word  # noqa: E402
+from modules import battery, bluetooth_session, camera, head, llm, memory, motion, phrases, stt, tts, wake_word  # noqa: E402
 from modules import health  # noqa: E402
 
 logger = logging.getLogger("robot_kanka")
@@ -530,6 +530,21 @@ def run_loop() -> None:
                 _log_line("MODE", f"{tid} | conversation_mode=on | wake_check=skipped")
 
             _log_line("HEARD", f"{text} | confidence: {conf:.2f}")
+
+            bt_handled, bt_replies = bluetooth_session.handle_turn(text)
+            if bt_handled:
+                _log_line("BT", f"{tid} | replies={len(bt_replies)} | phase={bluetooth_session.session().phase}")
+                full_bt = " ".join(bt_replies)
+                memory.append_conversation_line("Kullanıcı", text)
+                memory.append_conversation_line("Kanka", full_bt)
+                stt.record_dialogue_turn_for_stt(text, full_bt)
+                for i, line in enumerate(bt_replies):
+                    if not line.strip():
+                        continue
+                    _log_line("RESPONSE", line if len(bt_replies) == 1 else f"[{i + 1}/{len(bt_replies)}] {line}")
+                    kind, duration = _speak_reply(line, prefer_online=True, tid=tid)
+                    _log_line("TTS", f"{tid} | {kind} | bt | duration={duration:.1f}s")
+                continue
 
             t_route0 = time.perf_counter()
             tts_via_llm_stream = False

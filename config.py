@@ -228,7 +228,16 @@ AUDIO_INPUT_ALSA_DEVICE = _env_str("AUDIO_INPUT_ALSA_DEVICE", "")
 
 # ALSA output device override (aplay -D). Example: "hb" (from ~/.asoundrc) or "plughw:0,0"
 # If empty, `aplay` uses the default ALSA device.
-AUDIO_OUTPUT_ALSA_DEVICE = _env_str("AUDIO_OUTPUT_ALSA_DEVICE", "")
+AUDIO_OUTPUT_ALSA_DEVICE = _env_str("AUDIO_OUTPUT_ALSA_DEVICE", "hb")
+
+# Bluetooth kulaklık modu (bluealsa + bluetoothctl)
+BLUETOOTH_ENABLED = _env_bool("BLUETOOTH_ENABLED", True)
+BLUETOOTH_SCAN_SEC = float(os.getenv("BLUETOOTH_SCAN_SEC", "12"))
+BLUETOOTH_CONNECT_TIMEOUT_SEC = float(os.getenv("BLUETOOTH_CONNECT_TIMEOUT_SEC", "25"))
+BLUETOOTH_A2DP_PROFILE = _env_str("BLUETOOTH_A2DP_PROFILE", "a2dp")
+BLUETOOTH_LIST_PAIRED_ONLY = _env_bool("BLUETOOTH_LIST_PAIRED_ONLY", False)
+BLUETOOTH_MAX_LIST = int(os.getenv("BLUETOOTH_MAX_LIST", "8"))
+BLUETOOTH_SPEAKER_ALSA_DEVICE = _env_str("BLUETOOTH_SPEAKER_ALSA_DEVICE", "hb")
 
 # Battery monitoring (Robot-HAT voltage → %).
 # 2S Li-ion pack typical: 8.4V full, ~6.4V empty (under load değişir).

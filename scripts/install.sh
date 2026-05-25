@@ -69,7 +69,16 @@ sudo apt-get install -y \
   git python3-pip python3-venv alsa-utils \
   libportaudio2 portaudio19-dev \
   ffmpeg \
-  cmake build-essential
+  cmake build-essential \
+  bluez bluez-tools bluealsa
+
+RUN_USER="${SUDO_USER:-$USER}"
+if [[ -n "${RUN_USER}" && "${RUN_USER}" != "root" ]] && id "${RUN_USER}" &>/dev/null; then
+  sudo usermod -aG bluetooth "${RUN_USER}" 2>/dev/null || true
+fi
+sudo systemctl enable bluealsa.service 2>/dev/null || true
+sudo systemctl start bluealsa.service 2>/dev/null || true
+echo "[install] Bluetooth: bash scripts/setup_bluetooth_audio.sh (PipeWire notu için)"
 
 if [[ ! -d "$ROOT/venv" ]]; then
   python3 -m venv "$ROOT/venv"

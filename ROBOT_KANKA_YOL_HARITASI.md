@@ -583,6 +583,8 @@ Gün 5:  Modül H (Hafıza) + entegrasyon testleri + kabul testleri
 
 **Toplam süre tahmini:** 5-7 günlük geliştirici çalışması
 
+**Sesli Bluetooth kulaklık modu:** `modules/bluetooth_session.py`, kurulum `scripts/setup_bluetooth_audio.sh`, kullanım `docs/bluetooth-kulaklik.md`.
+
 ---
 
 *Bu yol haritası, fotoğraflar ve proje tanımı analiz edilerek hazırlanmıştır. Her modül bağımsız test edilebilir şekilde tasarlanmıştır.*
