@@ -352,7 +352,11 @@ def run_loop() -> None:
     stt.clear_stt_dialogue_hint()
 
     tts.set_output_device(None)
-    out_dev = tts.get_output_device() or "(ALSA varsayılan)"
+    out_dev = (
+        tts.get_output_device()
+        or getattr(config, "AUDIO_OUTPUT_ALSA_DEVICE", "")
+        or "(ALSA varsayılan)"
+    )
     logger.info("TTS çıkış cihazı: %s", out_dev)
     try:
         kind, duration = tts.speak(config.STARTUP_PHRASE, prefer_online=False)
@@ -561,8 +565,11 @@ def run_loop() -> None:
                     if not line.strip():
                         continue
                     _log_line("RESPONSE", line if len(bt_replies) == 1 else f"[{i + 1}/{len(bt_replies)}] {line}")
-                    kind, duration = _speak_reply(line, prefer_online=True, tid=tid)
-                    _log_line("TTS", f"{tid} | {kind} | bt | duration={duration:.1f}s")
+                    try:
+                        kind, duration = _speak_reply(line, prefer_online=True, tid=tid)
+                        _log_line("TTS", f"{tid} | {kind} | bt | duration={duration:.1f}s")
+                    except Exception as e:
+                        _log_line("TTS_ERR", f"{tid} | bt line {i + 1}: {type(e).__name__}: {e}")
                 continue
 
             t_route0 = time.perf_counter()

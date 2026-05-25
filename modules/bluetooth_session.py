@@ -213,8 +213,18 @@ def disconnect_and_power_off(mac: str | None = None) -> None:
     _run_bluetoothctl_script("disconnect\npower off\n", timeout=15)
 
 
+def default_speaker_alsa_device() -> str:
+    """Robot hoparlörü — AUDIO_OUTPUT_ALSA_DEVICE ile aynı (hb yoksa plughw:0,0)."""
+    for attr in ("BLUETOOTH_SPEAKER_ALSA_DEVICE", "AUDIO_OUTPUT_ALSA_DEVICE"):
+        v = (getattr(config, attr, "") or "").strip()
+        if v:
+            return v
+    return "plughw:0,0"
+
+
 def set_speaker_output() -> None:
-    dev = (getattr(config, "BLUETOOTH_SPEAKER_ALSA_DEVICE", "") or "hb").strip() or "hb"
+    dev = default_speaker_alsa_device()
+    logger.info("BT: hoparlör çıkışı → %s", dev)
     tts.set_output_device(dev)
 
 
