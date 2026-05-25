@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from typing import Optional
 
 import numpy as np
-import sounddevice as sd
 import torch
 
 import config
@@ -196,8 +196,10 @@ def _capture_arecord(
     max_samples: int,
     idle_timeout_sec: float | None,
     on_partial: Callable[[np.ndarray], None] | None,
+    *,
+    device: str | None = None,
 ) -> Optional[np.ndarray]:
-    dev = config.AUDIO_INPUT_ALSA_DEVICE
+    dev = (device or config.AUDIO_INPUT_ALSA_DEVICE or "").strip()
     if not dev:
         return None
 
@@ -286,6 +288,12 @@ def _capture_sounddevice(
     idle_timeout_sec: float | None,
     on_partial: Callable[[np.ndarray], None] | None,
 ) -> Optional[np.ndarray]:
+    try:
+        import sounddevice as sd
+    except Exception as e:
+        logger.error("sounddevice import edilemedi (PortAudio?): %s", e)
+        return None
+
     chunk_samples = 512 if sr == 16000 else 256
     device = None
     if config.AUDIO_INPUT_DEVICE:
@@ -339,8 +347,16 @@ def _capture_audio(
     max_dur = max_sec if max_sec is not None else config.MAX_UTTERANCE_SEC
     max_samples = int(max_dur * sr)
 
-    if config.AUDIO_INPUT_ALSA_DEVICE:
-        return _capture_arecord(sr, thr, silence, max_samples, idle_timeout_sec, on_partial)
+    alsa_dev = (config.AUDIO_INPUT_ALSA_DEVICE or "").strip()
+    if alsa_dev:
+        return _capture_arecord(
+            sr, thr, silence, max_samples, idle_timeout_sec, on_partial, device=alsa_dev
+        )
+    # Pi / Linux: PortAudio (sounddevice) PipeWire ile çakışır; arecord tercih edilir.
+    if sys.platform == "linux":
+        return _capture_arecord(
+            sr, thr, silence, max_samples, idle_timeout_sec, on_partial, device="default"
+        )
     return _capture_sounddevice(sr, thr, silence, max_samples, idle_timeout_sec, on_partial)
 
 
