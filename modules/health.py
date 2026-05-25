@@ -45,6 +45,17 @@ def check_audio_input() -> bool:
         return False
 
 
+def check_audio_input_device() -> tuple[bool, str]:
+    """Yapılandırılmış veya otomatik seçilen mikrofonu dener."""
+    from modules import alsa_devices
+
+    dev = alsa_devices.resolve_capture_device(rescan=True)
+    if dev:
+        return True, f"mikrofon ok ({dev})"
+    summary = alsa_devices.format_capture_device_summary()
+    return False, f"mikrofon açılamadı — {summary}"
+
+
 def check_bluetooth_tools() -> tuple[bool, str]:
     import config as cfg
 
@@ -83,6 +94,10 @@ def run_preflight() -> tuple[bool, str]:
         logger.warning("Hoparlör testi başarısız: %s", play_msg)
     if not check_audio_input():
         return False, "Mikrofon (arecord -l) bulunamadı."
+    mic_ok, mic_msg = check_audio_input_device()
+    if not mic_ok:
+        return False, mic_msg
+    logger.info("Mikrofon: %s", mic_msg)
     bt_ok, bt_msg = check_bluetooth_tools()
     if not bt_ok:
         logger.warning("Bluetooth ön kontrol: %s", bt_msg)

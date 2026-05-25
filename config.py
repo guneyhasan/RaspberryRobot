@@ -224,7 +224,9 @@ AUDIO_INPUT_DEVICE = _env_str("AUDIO_INPUT_DEVICE", "")
 
 # ALSA input device override (arecord -D). Example: "plughw:3,0"
 # If set, VAD will read audio via `arecord` instead of PortAudio/sounddevice.
+# Kart numarası reboot sonrası değişebilir; AUTO_DETECT açıkken alternatifler denenir.
 AUDIO_INPUT_ALSA_DEVICE = _env_str("AUDIO_INPUT_ALSA_DEVICE", "")
+AUDIO_INPUT_AUTO_DETECT = _env_bool("AUDIO_INPUT_AUTO_DETECT", True)
 
 # Ana döngü: konuşma başlaması için bekleme (saniye). arecord anında kapanırsa yine hızlı SKIP olur.
 LISTEN_WAIT_SEC = float(os.getenv("LISTEN_WAIT_SEC", "30"))

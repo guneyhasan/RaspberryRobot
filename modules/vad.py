@@ -12,8 +12,11 @@ import numpy as np
 import torch
 
 import config
+from modules import alsa_devices
 
 logger = logging.getLogger(__name__)
+
+_last_arecord_device_error = False
 
 _model = None
 _utils = None
@@ -224,6 +227,8 @@ def _capture_arecord(
     p: subprocess.Popen[bytes] | None = None
     stdout = None
     arecord_failed = False
+    global _last_arecord_device_error
+    _last_arecord_device_error = False
     try:
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         assert p.stdout is not None
@@ -231,9 +236,12 @@ def _capture_arecord(
         time.sleep(0.08)
         if p.poll() is not None:
             err = _read_subprocess_stderr(p)
+            _last_arecord_device_error = True
+            alsa_devices.invalidate_working_input()
             logger.error(
-                "arecord hemen kapandı (device=%s). arecord -l ile kart numarasını kontrol edin. stderr: %s",
+                "arecord hemen kapandı (device=%s). %s stderr: %s",
                 dev,
+                alsa_devices.format_capture_device_summary(),
                 err or "(boş)",
             )
             return None
@@ -247,6 +255,8 @@ def _capture_arecord(
                 return np.frombuffer(b, dtype=np.int16).copy()
             if p.poll() is not None:
                 arecord_failed = True
+                _last_arecord_device_error = True
+                alsa_devices.invalidate_working_input()
                 err = _read_subprocess_stderr(p)
                 logger.error(
                     "arecord akışı kesildi (device=%s). Cihaz meşgul veya yanlış olabilir (PipeWire?). stderr: %s",
@@ -347,16 +357,17 @@ def _capture_audio(
     max_dur = max_sec if max_sec is not None else config.MAX_UTTERANCE_SEC
     max_samples = int(max_dur * sr)
 
-    alsa_dev = (config.AUDIO_INPUT_ALSA_DEVICE or "").strip()
-    if alsa_dev:
-        return _capture_arecord(
-            sr, thr, silence, max_samples, idle_timeout_sec, on_partial, device=alsa_dev
-        )
-    # Pi / Linux: PortAudio (sounddevice) PipeWire ile çakışır; arecord tercih edilir.
-    if sys.platform == "linux":
-        return _capture_arecord(
-            sr, thr, silence, max_samples, idle_timeout_sec, on_partial, device="default"
-        )
+    if sys.platform == "linux" or (config.AUDIO_INPUT_ALSA_DEVICE or "").strip():
+        for rescan in (False, True):
+            dev = alsa_devices.resolve_capture_device(rescan=rescan)
+            if not dev:
+                return None
+            result = _capture_arecord(
+                sr, thr, silence, max_samples, idle_timeout_sec, on_partial, device=dev
+            )
+            if not _last_arecord_device_error:
+                return result
+        return None
     return _capture_sounddevice(sr, thr, silence, max_samples, idle_timeout_sec, on_partial)
 
 
