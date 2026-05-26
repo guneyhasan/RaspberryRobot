@@ -197,18 +197,19 @@ def _has_any_phrase(text: str, phrases_tuple: tuple[str, ...]) -> bool:
     return False
 
 
-POWEROFF_VOICE_TRIGGERS = (
-    "kanka robotu tamamen kapat",
-    "robotu tamamen kapat",
-    "kanka robotu tamamen kapa",
-    "robotu tamamen kapa",
-    "kanka kapan",
-)
+POWEROFF_EXACT_PHRASE = "robotu kapat kanka"
+
+
+def _norm_voice_phrase(s: str) -> str:
+    s = (s or "").casefold()
+    s = re.sub(r"[^0-9a-zA-Zçğıöşü\s]", " ", s, flags=re.UNICODE)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
 
 def _text_matches_poweroff_intent(text: str) -> bool:
-    low = (text or "").lower().strip()
-    return any(t in low for t in POWEROFF_VOICE_TRIGGERS)
+    """Yalnızca tam cümle eşleşmesi; içinde geçmesi yetmez."""
+    return _norm_voice_phrase(text) == _norm_voice_phrase(POWEROFF_EXACT_PHRASE)
 
 
 def _system_poweroff(reason: str) -> None:

@@ -1164,23 +1164,12 @@ def _wants_pair(text: str) -> bool:
 
 def _matches_open(text: str) -> bool:
     low = _norm_text(text)
-    triggers = (
-        "bluetooth kulaklik modunu ac",
-        "kulaklik modunu ac",
-        "bluetooth modunu ac",
-        "bluetooth kulaklik modu ac",
-    )
-    return any(t in low for t in triggers)
+    return "bluetooth ac" in low
 
 
 def _matches_close(text: str) -> bool:
     low = _norm_text(text)
-    triggers = (
-        "bluetooth kulaklik modunu kapat",
-        "kulaklik modunu kapat",
-        "bluetooth modunu kapat",
-    )
-    return any(t in low for t in triggers)
+    return "bluetooth kapat" in low
 
 
 def _matches_rescan(text: str) -> bool:

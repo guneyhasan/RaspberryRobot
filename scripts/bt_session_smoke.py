@@ -13,13 +13,16 @@ from modules import bluetooth_session  # noqa: E402
 
 def main() -> int:
     cases = [
-        ("kanka bluetooth kulaklık modunu aç", True),
-        ("kulaklik modunu ac", True),
+        ("bluetooth aç", True),
+        ("kanka bluetooth ac", True),
+        ("bluetooth kulaklık modunu aç", False),
+        ("kulaklik modunu ac", False),
         ("kanka 2 numaraya bağlan", True),
         ("iki numaraya baglan", True),
         ("iki numaraya eslestir", True),
         ("yeniden tara", True),
-        ("kanka bluetooth kulaklık modunu kapat", True),
+        ("bluetooth kapat", True),
+        ("kanka bluetooth kulaklık modunu kapat", False),
         ("merhaba kanka", False),
     ]
     ok = 0
