@@ -99,6 +99,14 @@
     "{name} eşleşmesini kaldırdım kanka.",
     "{n} numaranın eşleşmesini sildim kanka."
   ],
+  "bt_unpair_list_intro": [
+    "Tamam kanka, eşleşmiş cihazların bunlar. Hangisinin eşleşmesini kaldırayım, numara söyle.",
+    "Kayıtlı bluetooth cihazların kanka, kaldırmak istediğin numarayı söyle."
+  ],
+  "bt_await_unpair_number": [
+    "Hangi numaranın eşleşmesini kaldırayım kanka?",
+    "Kaldırmak için numara söyle kanka, örneğin bir numaranın eşleşmesini kaldır."
+  ],
   "bt_auto_connected": [
     "Eşleşmiş kulaklığa bağlandım kanka, ses kulaklıktan geliyor.",
     "Tamam kanka, kayıtlı kulaklığa bağlandım."

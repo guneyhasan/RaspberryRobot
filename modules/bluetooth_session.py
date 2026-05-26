@@ -18,6 +18,7 @@ from modules import phrases, tts
 logger = logging.getLogger(__name__)
 
 Phase = Literal["idle", "scanning", "awaiting", "connected"]
+SelectionMode = Literal["connect", "unpair"]
 
 _DEVICE_LINE = re.compile(
     r"^Device\s+([0-9A-Fa-f:]{17})\s+(.+)$",
@@ -64,6 +65,7 @@ class BtSession:
     discovered_only: bool = False  # True → listede keşfedilen (eşleştirme gerekebilir)
     bluealsa_pcm: str | None = None  # bluealsa-aplay -L satırı (tam PCM adı)
     audio_on_headphone: bool = False
+    pending_action: SelectionMode | None = None  # awaiting iken: bağlan veya unpair
 
 
 _session = BtSession()
@@ -594,6 +596,7 @@ def unpair_by_index(index: int) -> list[str]:
     s.devices = _numbered_list(paired) if paired else []
     s.phase = "awaiting"
     s.discovered_only = False
+    s.pending_action = "unpair" if paired else None
 
     msg = (
         phrases.pick(
@@ -799,46 +802,78 @@ def _parse_device_number(text: str) -> int | None:
     return None
 
 
-def _wants_unpair(text: str) -> bool:
+def _wants_unpair_direct(text: str) -> bool:
+    """Numara ile doğrudan eşleşmeyi kaldır (liste açmadan)."""
+    if _parse_device_number(text) is None:
+        return False
     low = _norm_text(text)
     if "unpair" in low:
         return True
     if any(
         p in low
         for p in (
+            "numarayi kaldir",
+            "numarayi unpair",
+            "numarayi sil",
+            "numaraya kaldir",
             "eslesmeyi kaldir",
             "eslesmeyi sil",
-            "eslesmeyi kopar",
             "eslesmesini kaldir",
             "eslesmesini sil",
             "eslestirmeyi kaldir",
             "eslestirmeyi sil",
-            "cihazi kaldir",
-            "cihazi sil",
-            "kaldir esles",
-            "sil esles",
         )
     ):
         return True
-    if "kaldir" in low and "eslestir" not in low and _parse_device_number(text) is not None:
-        return True
-    if "sil" in low and "eslestir" not in low and _parse_device_number(text) is not None:
+    if ("kaldir" in low or "sil" in low) and ("eslestir" in low or "esles" in low):
         return True
     return False
+
+
+def _matches_unpair_menu(text: str) -> bool:
+    """Eşleşmiş cihazları listele, sonra numara ile kaldır."""
+    if _wants_unpair_direct(text):
+        return False
+    if _parse_device_number(text) is not None:
+        return False
+    low = _norm_text(text)
+    triggers = (
+        "bluetooth eslestirme kaldir",
+        "eslestirme kaldir",
+        "eslesmeyi kaldir",
+        "eslestirmeyi kaldir",
+        "eslesmisleri kaldir",
+        "eslesmis cihazlari kaldir",
+        "bagli cihazlari kaldir",
+        "eslesmeyi sil",
+        "unpair listesi",
+    )
+    if any(t in low for t in triggers):
+        return True
+    if ("kaldir" in low or "sil" in low) and ("eslestir" in low or "esles" in low or "bluetooth" in low):
+        return True
+    return False
+
+
+def _wants_unpair(text: str) -> bool:
+    """Geriye uyumluluk: doğrudan veya menü sonrası kaldırma niyeti."""
+    return _wants_unpair_direct(text) or _session.pending_action == "unpair"
 
 
 def is_selection_utterance(text: str) -> bool:
     """Liste okunurken kesip seçim yapılabilir mi?"""
     if _parse_device_number(text) is not None:
         return True
-    if _wants_unpair(text) or _wants_pair(text):
+    if _wants_unpair_direct(text) or _session.pending_action == "unpair":
+        return True
+    if _wants_pair(text):
         return True
     low = _norm_text(text)
     return any(k in low for k in ("baglan", "numara", "unpair", "eslestir", "kaldir"))
 
 
 def _wants_pair(text: str) -> bool:
-    if _wants_unpair(text):
+    if _wants_unpair_direct(text) or _matches_unpair_menu(text):
         return False
     low = _norm_text(text)
     return any(
@@ -892,7 +927,13 @@ def _reset_session() -> None:
     _session = BtSession()
 
 
-def _list_replies(intro_key: str, devices: list[tuple[int, str, str]], *, scan_hint: bool) -> list[str]:
+def _list_replies(
+    intro_key: str,
+    devices: list[tuple[int, str, str]],
+    *,
+    scan_hint: bool,
+    await_key: str | None = None,
+) -> list[str]:
     total = len(devices)
     replies: list[str] = [
         phrases.pick(intro_key, fallback="Cihazlar kanka:"),
@@ -926,7 +967,9 @@ def _list_replies(intro_key: str, devices: list[tuple[int, str, str]], *, scan_h
         for num, name, mac in unnamed:
             replies.append(_tts_device_line(num, name, mac))
 
-    if scan_hint:
+    if await_key:
+        replies.append(phrases.pick(await_key, fallback="Numara söyle kanka."))
+    elif scan_hint:
         replies.append(
             phrases.pick(
                 "bt_await_pair_or_connect",
@@ -1243,12 +1286,55 @@ def _try_auto_connect_paired(paired: list[tuple[str, str]]) -> list[str] | None:
     ]
 
 
+def show_unpair_menu() -> list[str]:
+    """Eşleşmiş (kayıtlı) cihazları listele; kullanıcı numara ile unpair eder."""
+    global _session
+    if not is_enabled():
+        return [phrases.pick("bt_error_disabled", fallback="Bluetooth modu kapalı kanka.")]
+
+    if not _session.active:
+        _session.active = True
+        _session.phase = "scanning"
+
+    ok, err = ensure_adapter_ready()
+    if not ok:
+        return [err or phrases.pick("bt_error_adapter", fallback="Bluetooth açılamadı kanka.")]
+
+    paired = list_paired_devices()
+    _session.pending_action = "unpair"
+    _session.phase = "awaiting"
+    _session.discovered_only = False
+
+    if not paired:
+        _session.devices = []
+        _session.pending_action = None
+        return [
+            phrases.pick(
+                "bt_unpair_list_intro",
+                fallback="Eşleşmeyi kaldırmak için önce eşleşmiş cihaz lazım kanka.",
+            ),
+            phrases.pick(
+                "bt_error_no_devices",
+                fallback="Kayıtlı bluetooth cihazı yok kanka.",
+            ),
+        ]
+
+    _session.devices = _numbered_list(paired)
+    return _list_replies(
+        "bt_unpair_list_intro",
+        _session.devices,
+        scan_hint=False,
+        await_key="bt_await_unpair_number",
+    )
+
+
 def open_mode() -> list[str]:
     global _session, _open_ack_spoken
     if not is_enabled():
         return [phrases.pick("bt_error_disabled", fallback="Bluetooth modu kapalı kanka.")]
 
     _open_ack_spoken = False
+    _session.pending_action = None
     ack = phrases.pick(
         "bt_open",
         fallback="Tamam kanka, bluetooth açık, cihazlara bakıyorum.",
@@ -1439,6 +1525,9 @@ def handle_turn(text: str) -> tuple[bool, list[str]]:
     if _matches_manual_sync(text):
         return True, sync_headphone_from_system()
 
+    if _matches_unpair_menu(text):
+        return True, show_unpair_menu()
+
     if (
         _session.phase == "connected"
         and _session.connected_mac
@@ -1451,11 +1540,13 @@ def handle_turn(text: str) -> tuple[bool, list[str]]:
 
     num = _parse_device_number(text)
     if num is not None and _session.active:
-        if _wants_unpair(text):
+        if _session.pending_action == "unpair" or _wants_unpair_direct(text):
             return True, unpair_by_index(num)
         if _wants_pair(text):
+            _session.pending_action = None
             return True, pair_and_connect_by_index(num)
         if _session.phase in ("awaiting", "connected") or "baglan" in _norm_text(text):
+            _session.pending_action = None
             return True, connect_by_index(num, force_pair=False)
 
     if _session.active and _session.phase == "awaiting":
