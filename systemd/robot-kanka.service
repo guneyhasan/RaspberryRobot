@@ -1,8 +1,12 @@
 [Unit]
 Description=Robot Kanka AI Service
-After=network-online.target bluetooth.target sound.target bluealsa.service speaker-enable.service
-Wants=network-online.target
+# network-online boot'ta çoğu Pi'de aktif olmaz; Wants= ile robot-kanka hiç başlamayabilir.
+# Ağ hazırlığı health_check.sh içinde kontrol edilir.
+After=network.target bluetooth.target sound.target bluealsa.service speaker-enable.service
+Wants=network.target
 Requires=speaker-enable.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -15,8 +19,6 @@ ExecStartPre=@ROOT@/scripts/health_check.sh
 ExecStart=@ROOT@/venv/bin/python @ROOT@/main.py
 Restart=always
 RestartSec=10
-StartLimitIntervalSec=60
-StartLimitBurst=3
 StandardOutput=append:/var/log/robot-kanka.log
 StandardError=append:/var/log/robot-kanka-error.log
 

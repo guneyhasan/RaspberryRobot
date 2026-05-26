@@ -42,20 +42,20 @@ sudo systemctl start robot-kanka
 ## Bağımlılık sırası
 
 ```
-network-online.target
+network.target
 sound.target
 bluetooth.target
 bluealsa.service
 speaker-enable.service
         ↓
-health_check.sh (max 60 sn bekleme)
+health_check.sh (max 60 sn bekleme; isteğe ping)
         ↓
 robot-kanka.service → main.py
 ```
 
 | Servis | Amaç |
 |--------|------|
-| `network-online.target` | Ağ hazır (STT/TTS API) |
+| `network.target` | Temel ağ yığını (boot'ta güvenilir; `network-online` çoğu Pi'de pasif kalır) |
 | `sound.target` | ALSA |
 | `bluetooth.target` | Kulaklık modu |
 | `bluealsa.service` | BT ses (`BLUETOOTH_ENABLED=1` ise) |
@@ -112,6 +112,20 @@ sudo -n poweroff --help
 Kabul listesi: `scripts/acceptance_checklist.txt`
 
 ## Sorun giderme
+
+**Boot'ta `inactive`, elle `start` çalışıyor**
+
+`list-dependencies` içinde `○ robot-kanka.service` ve journal'da boot'ta `Starting` yoksa: genelde `Wants=network-online.target` yüzünden. Güncel unit `network.target` kullanır; Pi'de yeniden kurun:
+
+```bash
+cd ~/RaspberryRobot
+PI_USER="$(whoami)" ROOT="$(pwd)"
+sed -e "s|@USER@|${PI_USER}|g" -e "s|@ROOT@|${ROOT}|g" \
+  systemd/robot-kanka.service | sudo tee /etc/systemd/system/robot-kanka.service
+sudo systemctl daemon-reload
+sudo systemctl enable robot-kanka
+sudo reboot
+```
 
 **Servis hemen düşüyor**
 
