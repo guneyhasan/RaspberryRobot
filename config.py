@@ -442,4 +442,4 @@ Kanka modu örneği:
 # Kamera: komut olmaksızın bu süre (dakika) açık kalırsa otomatik kapat
 CAMERA_AUTO_CLOSE_MIN = float(os.getenv("CAMERA_AUTO_CLOSE_MIN", "25"))
 
-STARTUP_PHRASE = os.getenv("STARTUP_PHRASE", "Hazırım Cihan.")
+STARTUP_PHRASE = os.getenv("STARTUP_PHRASE", "Merhaba Cihan.")
