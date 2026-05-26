@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 
@@ -21,6 +23,7 @@ _SKIP_CARD_HINTS = (
 )
 
 _working_dev: str | None = None
+_arecord_list_warned: bool = False
 
 
 @dataclass(frozen=True)
@@ -35,6 +38,14 @@ class CaptureDevice:
 
 
 def _run_arecord_list() -> str:
+    global _arecord_list_warned
+    exe = shutil.which("arecord")
+    if not exe and not _arecord_list_warned:
+        logger.warning(
+            "arecord PATH'te yok (systemd ortamı?). PATH=%r — alsa-utils kurulu mu?",
+            os.environ.get("PATH", ""),
+        )
+        _arecord_list_warned = True
     try:
         r = subprocess.run(
             ["arecord", "-l"],
@@ -44,8 +55,22 @@ def _run_arecord_list() -> str:
         )
         if r.returncode == 0:
             return r.stdout or ""
+        if not _arecord_list_warned:
+            stderr = (r.stderr or "").strip()
+            logger.warning(
+                "arecord -l başarısız (rc=%s). stderr=%s",
+                r.returncode,
+                stderr[:500] if stderr else "(boş)",
+            )
+            _arecord_list_warned = True
     except (OSError, subprocess.TimeoutExpired) as e:
-        logger.debug("arecord -l başarısız: %s", e)
+        if not _arecord_list_warned:
+            logger.warning(
+                "arecord -l çalıştırılamadı: %s | PATH=%r",
+                e,
+                os.environ.get("PATH", ""),
+            )
+            _arecord_list_warned = True
     return ""
 
 

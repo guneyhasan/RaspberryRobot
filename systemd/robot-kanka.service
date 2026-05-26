@@ -12,8 +12,11 @@ StartLimitBurst=3
 Type=simple
 User=@USER@
 Group=@USER@
+# SSH oturumu "groups" çıktısında görünür; systemd'de eksik kalırsa mic /dev/snd erişimi olmaz.
+SupplementaryGroups=audio
 WorkingDirectory=@ROOT@
 Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 EnvironmentFile=-@ROOT@/.env
 ExecStartPre=@ROOT@/scripts/health_check.sh
 ExecStart=@ROOT@/venv/bin/python @ROOT@/main.py

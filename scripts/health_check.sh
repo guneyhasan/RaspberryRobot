@@ -6,16 +6,17 @@ mkdir -p "$ROOT/logs"
 ERR_LOG="${ROBOT_KANKA_ERR_LOG:-$ROOT/logs/health_err.log}"
 log_err() { echo "[$(date -Iseconds)] $*" >>"$ERR_LOG"; }
 
-WAIT_MAX="${HEALTH_WAIT_MAX_SEC:-60}"
-WAIT_INTERVAL="${HEALTH_WAIT_INTERVAL_SEC:-2}"
-BOOT_DELAY="${BOOT_DELAY_SEC:-0}"
-
 if [[ -f "$ROOT/.env" ]]; then
   # shellcheck disable=SC1091
   set -a
   source "$ROOT/.env" 2>/dev/null || true
   set +a
 fi
+
+WAIT_MAX="${HEALTH_WAIT_MAX_SEC:-60}"
+WAIT_INTERVAL="${HEALTH_WAIT_INTERVAL_SEC:-2}"
+BOOT_DELAY="${BOOT_DELAY_SEC:-0}"
+MIC_SETTLE="${MIC_SETTLE_SEC:-0}"
 
 if [[ "$BOOT_DELAY" =~ ^[0-9]+$ ]] && (( BOOT_DELAY > 0 )); then
   log_err "[INFO] BOOT_DELAY_SEC=${BOOT_DELAY}, bekleniyor..."
@@ -77,6 +78,11 @@ while ! _deps_ready; do
   sleep "$WAIT_INTERVAL"
   elapsed=$(( elapsed + WAIT_INTERVAL ))
 done
+
+if [[ "$MIC_SETTLE" =~ ^[0-9]+$ ]] && (( MIC_SETTLE > 0 )); then
+  log_err "[INFO] MIC_SETTLE_SEC=${MIC_SETTLE} (USB mic enumerate sonrası), bekleniyor..."
+  sleep "$MIC_SETTLE"
+fi
 
 if ! ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
   ONNX=$(find "$ROOT/models/tr_TR-ahmet-medium" "$ROOT/models" -maxdepth 1 -name '*.onnx' 2>/dev/null | head -1)

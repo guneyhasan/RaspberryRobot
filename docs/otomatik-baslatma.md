@@ -66,6 +66,7 @@ robot-kanka.service → main.py
 | Değişken | Varsayılan | Açıklama |
 |----------|------------|----------|
 | `BOOT_DELAY_SEC` | `0` | İlk kontrolden önce ekstra bekleme (USB/ses kartı gecikmesi için 10–15) |
+| `MIC_SETTLE_SEC` | `0` | Mikrofon `arecord -l`'de göründükten sonra ek bekleme (USB enumerate — serviste 8–15 deneyin) |
 | `HEALTH_WAIT_MAX_SEC` | `60` | Ses/mikrofon/servisler için max bekleme |
 | `HEALTH_WAIT_INTERVAL_SEC` | `2` | Kontrol aralığı |
 | `BLUETOOTH_ENABLED` | `1` | `1` ise `bluealsa.service` aktif olana kadar bekler |
@@ -149,7 +150,11 @@ systemctl status speaker-enable bluealsa
 
 ```
 BOOT_DELAY_SEC=15
+HEALTH_WAIT_MAX_SEC=120
+MIC_SETTLE_SEC=12
 ```
+
+Güncel `robot-kanka.service` systemd tarafında `SupplementaryGroups=audio` kullanır; SSH'da mikrofon varken serviste `arecord -l boş` görüyorsanız önce `sudo cp systemd/robot-kanka.service` ile unit'i yeniden kurup `daemon-reload` yapın ve `MIC_SETTLE_SEC` artırın.
 
 **Kullanıcı izinleri (GPIO/I2C/ses)**
 
