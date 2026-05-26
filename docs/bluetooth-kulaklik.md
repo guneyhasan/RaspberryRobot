@@ -57,8 +57,28 @@ trust AA:BB:CC:DD:EE:FF
 | kanka 2 numaraya eşleştir | 2. cihazı pair + bağlan |
 | yeniden tara / tekrar tara | Yakındaki cihazları yeniden listele |
 | kanka bluetooth kulaklık modunu kapat | Hoparlöre dön, BT kapat |
+| kanka bluetooth kulaklığa bağlandım | Elle `bluetoothctl` ile bağlandıysan ses çıkışını bluealsa PCM’den senkronize et |
 
 `hey kanka` ile konuşma modu açıkken ekstra wake gerekmez.
+
+## `PCM not found` / ses ikinci cümlede kesiliyorsa
+
+Kulaklık Bluetooth’ta bağlı görünse bile TTS için **bluealsa-aplay -L** içinde bir satır olmalı:
+
+```bash
+bluealsa-aplay -L
+# örnek: bluealsa:DEV=1C:B3:C9:B6:50:7B,PROFILE=a2dp
+```
+
+Boşsa:
+
+```bash
+sudo systemctl restart bluealsa
+bluetoothctl connect 1C:B3:C9:B6:50:7B
+bluealsa-aplay -L
+```
+
+Robot artık tahmini MAC yerine listedeki **gerçek PCM adını** kullanır. PCM yoksa TTS otomatik **hoparlöre** (`AUDIO_OUTPUT_ALSA_DEVICE`, örn. `plughw:0,0`) düşer; cevap yine duyulur.
 
 ## Tarama boş kalıyorsa
 

@@ -60,6 +60,8 @@ class BtSession:
     connected_mac: str | None = None
     connected_index: int | None = None
     discovered_only: bool = False  # True → listede keşfedilen (eşleştirme gerekebilir)
+    bluealsa_pcm: str | None = None  # bluealsa-aplay -L satırı (tam PCM adı)
+    audio_on_headphone: bool = False
 
 
 _session = BtSession()
@@ -182,9 +184,70 @@ def _normalize_mac(mac: str) -> str:
 
 
 def bluealsa_device_for_mac(mac: str) -> str:
+    """Tahmini PCM adı; mümkünse discover_bluealsa_pcm kullanın."""
     mac = _normalize_mac(mac)
+    if _session.bluealsa_pcm and _session.connected_mac == mac:
+        return _session.bluealsa_pcm
     profile = getattr(config, "BLUETOOTH_A2DP_PROFILE", "a2dp") or "a2dp"
     return f"bluealsa:DEV={mac},PROFILE={profile}"
+
+
+def list_bluealsa_playback_pcms() -> list[tuple[str, str]]:
+    """bluealsa-aplay -L → [(MAC, tam_pcm_adi), ...]"""
+    try:
+        r = subprocess.run(
+            ["bluealsa-aplay", "-L"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except FileNotFoundError:
+        logger.warning("bluealsa-aplay bulunamadı")
+        return []
+    except (OSError, subprocess.TimeoutExpired) as e:
+        logger.warning("bluealsa-aplay -L hatası: %s", e)
+        return []
+
+    listing = (r.stdout or "") + (r.stderr or "")
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for raw_line in listing.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("bluealsa:DEV="):
+            continue
+        pcm = line.split()[0]
+        m = re.search(r"DEV=([0-9A-Fa-f:]{17})", pcm, re.I)
+        if not m:
+            continue
+        mac = _normalize_mac(m.group(1))
+        if mac in seen:
+            continue
+        seen.add(mac)
+        if "a2dp" in pcm.lower() or "PROFILE=" in pcm.upper():
+            out.append((mac, pcm))
+    logger.info("bluealsa PCM listesi: %s", [p[1] for p in out])
+    return out
+
+
+def discover_bluealsa_pcm(mac: str | None = None) -> str | None:
+    """Gerçekten açılabilir PCM adını döndürür; yoksa None."""
+    mac_n = _normalize_mac(mac) if mac else None
+    pcms = list_bluealsa_playback_pcms()
+    if not pcms:
+        return None
+    if mac_n:
+        for m, pcm in pcms:
+            if m == mac_n:
+                return pcm
+        return None
+    if len(pcms) == 1:
+        return pcms[0][1]
+    last = _load_last_mac()
+    if last:
+        for m, pcm in pcms:
+            if m == last:
+                return pcm
+    return pcms[0][1]
 
 
 def ensure_adapter_ready() -> tuple[bool, str]:
@@ -290,29 +353,21 @@ def scan_devices(timeout_sec: float | None = None) -> list[tuple[str, str]]:
 
 
 def wait_a2dp_ready(mac: str, timeout_sec: float | None = None) -> bool:
-    timeout_sec = timeout_sec if timeout_sec is not None else float(config.BLUETOOTH_CONNECT_TIMEOUT_SEC)
+    """bluealsa-aplay -L içinde PCM görünene kadar bekler (sadece Connected: yes yetmez)."""
+    timeout_sec = timeout_sec if timeout_sec is not None else float(
+        getattr(config, "BLUETOOTH_A2DP_WAIT_SEC", config.BLUETOOTH_CONNECT_TIMEOUT_SEC)
+    )
     mac = _normalize_mac(mac)
-    target = bluealsa_device_for_mac(mac)
     deadline = time.time() + timeout_sec
     while time.time() < deadline:
-        try:
-            r = subprocess.run(
-                ["bluealsa-aplay", "-L"],
-                capture_output=True,
-                text=True,
-                timeout=8,
-            )
-            listing = (r.stdout or "") + (r.stderr or "")
-            if target in listing or mac.replace(":", "") in listing.replace(":", ""):
-                return True
-        except FileNotFoundError:
-            pass
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-        _, info = _run_bluetoothctl_script(f"info {mac}\n", timeout=10)
-        if "Connected: yes" in info:
+        pcm = discover_bluealsa_pcm(mac)
+        if pcm:
+            _session.bluealsa_pcm = pcm
             return True
-        time.sleep(1.0)
+        _, info = _run_bluetoothctl_script(f"info {mac}\n", timeout=10)
+        if "Connected: yes" not in info:
+            logger.debug("BT %s henüz Connected: yes değil", mac)
+        time.sleep(1.5)
     return False
 
 
@@ -357,7 +412,7 @@ connect {mac}
         if "Failed" in out2 and "Connected: yes" not in out2:
             return False, "Bağlantı kurulamadı kanka."
     if not wait_a2dp_ready(mac, timeout_sec=timeout):
-        logger.warning("A2DP/bluealsa hazır değil, yine de devam: %s", mac)
+        logger.warning("A2DP/bluealsa PCM hazır değil: %s (bluealsa-aplay -L boş olabilir)", mac)
     return True, ""
 
 
@@ -382,8 +437,33 @@ def set_speaker_output() -> None:
     tts.set_output_device(dev)
 
 
-def set_headphone_output(mac: str) -> None:
-    tts.set_output_device(bluealsa_device_for_mac(mac))
+def set_headphone_output(mac: str) -> bool:
+    """Kulaklık PCM'i bluealsa-aplay -L'den alır; yoksa False."""
+    pcm = discover_bluealsa_pcm(mac)
+    if not pcm:
+        logger.error(
+            "bluealsa PCM yok MAC=%s — kulaklık bağlı olsa bile A2DP hazır değil. "
+            "Kontrol: bluealsa-aplay -L",
+            mac,
+        )
+        return False
+    _session.bluealsa_pcm = pcm
+    _session.audio_on_headphone = True
+    tts.set_output_device(pcm)
+    logger.info("BT: kulaklık çıkışı → %s", pcm)
+    return True
+
+
+def ensure_headphone_audio(mac: str | None = None) -> bool:
+    """Bağlı oturumda PCM yoksa yeniden dene; yoksa hoparlör."""
+    mac = _normalize_mac(mac or _session.connected_mac or "")
+    if not mac:
+        return False
+    if set_headphone_output(mac):
+        return True
+    set_speaker_output()
+    _session.audio_on_headphone = False
+    return False
 
 
 def _list_limit() -> int | None:
@@ -582,17 +662,82 @@ def _list_replies(intro_key: str, devices: list[tuple[int, str, str]], *, scan_h
 
 def _finish_connect(mac: str, name: str, index: int | None = None) -> list[str]:
     global _session
-    set_headphone_output(mac)
     _session.phase = "connected"
     _session.connected_mac = mac
     _session.connected_index = index
     _save_last_mac(mac, name)
-    msg = phrases.pick(
-        "bt_connected",
-        fallback=f"{name} kulaklığına bağlandım kanka, ses artık kulaklıktan geliyor.",
-    )
+
+    wait_a2dp_ready(mac)
+    if set_headphone_output(mac):
+        msg = phrases.pick(
+            "bt_connected",
+            fallback=f"{name} kulaklığına bağlandım kanka, ses artık kulaklıktan geliyor.",
+        )
+    else:
+        set_speaker_output()
+        msg = phrases.pick(
+            "bt_connected_speaker_fallback",
+            fallback=(
+                f"Bağlandım kanka ama kulaklık sesi henüz hazır değil; şimdilik robot hoparlöründen konuşuyorum. "
+                f"bluealsa-aplay -L boşsa: sudo systemctl restart bluealsa"
+            ),
+        )
     n = str(index) if index is not None else "1"
     return [msg.replace("{n}", n).replace("{name}", name)]
+
+
+def _matches_manual_sync(text: str) -> bool:
+    low = _norm_text(text)
+    return any(
+        k in low
+        for k in (
+            "kulakliga baglandim",
+            "kulaklik baglandim",
+            "bluetooth kulakliga baglandim",
+            "bluetooth kulaklig baglandim",
+            "kulakliga bagli",
+            "kulaklik moduna baglandim",
+        )
+    )
+
+
+def sync_headphone_from_system() -> list[str]:
+    """Elle bluetoothctl ile bağlandıktan sonra bluealsa PCM'den oturumu senkronize et."""
+    global _session
+    pcms = list_bluealsa_playback_pcms()
+    if not pcms:
+        return [
+            phrases.pick(
+                "bt_error_no_bluealsa_pcm",
+                fallback=(
+                    "Kulaklık sistemde görünmüyor kanka. bluealsa-aplay -L boş mu? "
+                    "Kulaklığı bağla, sonra: sudo systemctl restart bluealsa"
+                ),
+            )
+        ]
+
+    mac, pcm = pcms[0]
+    last = _load_last_mac()
+    if last:
+        for m, p in pcms:
+            if m == last:
+                mac, pcm = m, p
+                break
+
+    _session.active = True
+    _session.phase = "connected"
+    _session.connected_mac = mac
+    _session.bluealsa_pcm = pcm
+    _session.audio_on_headphone = True
+    tts.set_output_device(pcm)
+    _save_last_mac(mac, "")
+    logger.info("BT manuel senkron: %s → %s", mac, pcm)
+    return [
+        phrases.pick(
+            "bt_manual_sync_ok",
+            fallback="Tamam kanka, kulaklık sesini duyacaksın artık.",
+        )
+    ]
 
 
 def _try_auto_connect_paired(paired: list[tuple[str, str]]) -> list[str] | None:
@@ -798,6 +943,16 @@ def handle_turn(text: str) -> tuple[bool, list[str]]:
 
     if _matches_open(text):
         return True, open_mode()
+
+    if _matches_manual_sync(text):
+        return True, sync_headphone_from_system()
+
+    if (
+        _session.phase == "connected"
+        and _session.connected_mac
+        and not _session.audio_on_headphone
+    ):
+        ensure_headphone_audio(_session.connected_mac)
 
     if _session.active and _matches_rescan(text):
         return True, rescan_devices()

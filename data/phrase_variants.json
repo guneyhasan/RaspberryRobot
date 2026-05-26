@@ -47,6 +47,18 @@
     "{n} numaraya bağlandım kanka, ses artık kulaklıktan geliyor.",
     "Tamam kanka, {name} kulaklığına bağlandım."
   ],
+  "bt_connected_speaker_fallback": [
+    "Bağlandım kanka ama kulaklık sesi henüz hazır değil, şimdilik hoparlörden konuşuyorum.",
+    "Kulaklığa bağlıyız kanka ama ses kanalı açılmadı, bir süre robot hoparlöründen duyarsın."
+  ],
+  "bt_manual_sync_ok": [
+    "Tamam kanka, kulaklık sesini duyacaksın artık.",
+    "Kulaklık sesi ayarlandı kanka."
+  ],
+  "bt_error_no_bluealsa_pcm": [
+    "Kulaklık ses kanalı görünmüyor kanka. bluealsa-aplay -L boş mu? Kulaklığı bağla, sonra bluealsa servisini yeniden başlat.",
+    "Ses kulaklığa gitmiyor kanka, sistemde A2DP hazır değil gibi."
+  ],
   "bt_closed": [
     "Kanka bluetooth kulaklık modunu kapattım, normal hoparlöre döndüm.",
     "Bluetooth kapalı kanka, ses yine robot hoparlöründen."

@@ -62,6 +62,31 @@ def internet_available(host: str = "8.8.8.8", port: int = 53, timeout: float = 2
         return False
 
 
+def _speaker_fallback_device() -> str:
+    """bluealsa PCM yokken TTS için hoparlör ALSA cihazı."""
+    bt_sp = (getattr(config, "BLUETOOTH_SPEAKER_ALSA_DEVICE", "") or "").strip()
+    if bt_sp:
+        return bt_sp
+    base = (config.AUDIO_OUTPUT_ALSA_DEVICE or "").strip()
+    return base or "plughw:0,0"
+
+
+def _rebuild_aplay_cmd(cmd: list[str], device: str) -> list[str]:
+    out: list[str] = []
+    i = 0
+    while i < len(cmd):
+        if cmd[i] == "-D" and i + 1 < len(cmd):
+            out.extend(["-D", device])
+            i += 2
+            continue
+        out.append(cmd[i])
+        i += 1
+    if "-D" not in out and cmd and cmd[0] == "aplay":
+        insert_at = 2 if len(cmd) > 1 and cmd[1] == "-q" else 1
+        out = cmd[:insert_at] + ["-D", device] + cmd[insert_at:]
+    return out
+
+
 def _aplay_cmd_base(*, rate: int | None = None, channels: int = 1, raw: bool = False) -> list[str]:
     cmd = ["aplay", "-q"]
     dev = _effective_output_device()
@@ -72,20 +97,39 @@ def _aplay_cmd_base(*, rate: int | None = None, channels: int = 1, raw: bool = F
     return cmd
 
 
-def _run_aplay(cmd: list[str], *, context: str = "aplay") -> None:
+def _run_aplay(cmd: list[str], *, context: str = "aplay", allow_fallback: bool = True) -> None:
+    dev_before = _effective_output_device() or ""
     r = subprocess.run(cmd, check=False, capture_output=True)
     if r.returncode == 0:
         return
     err = (r.stderr or b"").decode("utf-8", errors="replace").strip()
-    dev = _effective_output_device() or "(varsayılan)"
+    rc = r.returncode
+    dev = dev_before or "(varsayılan)"
+
+    if allow_fallback and dev_before.startswith("bluealsa"):
+        fb = _speaker_fallback_device()
+        logger.warning(
+            "%s bluealsa başarısız, hoparlöre düşülüyor: %s (önceki=%s)",
+            context,
+            fb,
+            dev_before,
+        )
+        set_output_device(fb)
+        r2 = subprocess.run(_rebuild_aplay_cmd(cmd, fb), check=False, capture_output=True)
+        if r2.returncode == 0:
+            return
+        err = (r2.stderr or b"").decode("utf-8", errors="replace").strip()
+        rc = r2.returncode
+        dev = fb
+
     logger.error(
         "%s başarısız (rc=%s, device=%s): %s",
         context,
-        r.returncode,
+        rc,
         dev,
         err[-500:] if err else "(stderr boş)",
     )
-    raise RuntimeError(f"{context} rc={r.returncode} device={dev}: {err[:200]}")
+    raise RuntimeError(f"{context} rc={rc} device={dev}: {err[:200]}")
 
 
 def play_audio_file(path: Path) -> None:
@@ -174,7 +218,7 @@ def _piper_sample_rate() -> int:
     return 22050
 
 
-def _speak_piper_streaming(text: str) -> float:
+def _speak_piper_streaming(text: str, *, _allow_bt_fallback: bool = True) -> float:
     """
     Piper --output-raw → aplay doğrudan boru hattı.
     Sentez başlar başlamaz ses çalmaya başlar; geçici WAV dosyası yazmaz.
@@ -228,6 +272,14 @@ def _speak_piper_streaming(text: str) -> float:
             raise RuntimeError(f"Piper streaming hatası (rc={rc_piper}): {err[:300]}")
 
         if rc_aplay != 0:
+            if _allow_bt_fallback and (dev if dev != "(varsayılan)" else "").startswith("bluealsa"):
+                fb = _speaker_fallback_device()
+                logger.warning(
+                    "Piper streaming bluealsa hatası, hoparlöre düşülüyor: %s",
+                    fb,
+                )
+                set_output_device(fb)
+                return _speak_piper_streaming(text, _allow_bt_fallback=False)
             err_b = b""
             if p_aplay.stderr:
                 try:
