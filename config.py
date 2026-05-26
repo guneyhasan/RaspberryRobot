@@ -232,6 +232,8 @@ AUDIO_INPUT_AUTO_DETECT = _env_bool("AUDIO_INPUT_AUTO_DETECT", True)
 LISTEN_WAIT_SEC = float(os.getenv("LISTEN_WAIT_SEC", "30"))
 # Mikrofon/arecord hatasında CPU döngüsünü önlemek için kısa bekleme (saniye).
 LISTEN_FAST_FAIL_BACKOFF_SEC = float(os.getenv("LISTEN_FAST_FAIL_BACKOFF_SEC", "0.35"))
+# arecord stdout okuma zaman aşımı (saniye); idle timeout'un çalışması için gerekli.
+VAD_ARECORD_READ_TIMEOUT_SEC = float(os.getenv("VAD_ARECORD_READ_TIMEOUT_SEC", "0.25"))
 
 # ALSA output device override (aplay -D). Example: "hb" (from ~/.asoundrc) or "plughw:0,0"
 # If empty, `aplay` uses the default ALSA device.

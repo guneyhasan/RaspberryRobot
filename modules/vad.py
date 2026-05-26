@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import select
 import subprocess
 import sys
 import time
@@ -17,6 +18,7 @@ from modules import alsa_devices
 logger = logging.getLogger(__name__)
 
 _last_arecord_device_error = False
+_active_arecord_proc: subprocess.Popen[bytes] | None = None
 
 _model = None
 _utils = None
@@ -26,12 +28,14 @@ def _load_silero():
     global _model, _utils
     if _model is not None:
         return _model, _utils
+    logger.info("VAD modeli yükleniyor (ilk seferde 30–90 sn sürebilir)...")
+    t0 = time.perf_counter()
     try:
         from silero_vad import load_silero_vad  # type: ignore
 
         model = load_silero_vad()
         _model, _utils = model, None
-        logger.info("VAD modeli yüklendi (backend=silero_vad paketi).")
+        logger.info("VAD modeli yüklendi (backend=silero_vad paketi, %.1fs).", time.perf_counter() - t0)
         return _model, _utils
     except Exception as e:
         logger.warning("silero_vad paketinden yüklenemedi, torch.hub denenecek: %s", e)
@@ -44,8 +48,34 @@ def _load_silero():
         trust_repo=True,
     )
     _model, _utils = model, utils
-    logger.info("VAD modeli yüklendi (backend=torch.hub).")
+    logger.info("VAD modeli yüklendi (backend=torch.hub, %.1fs).", time.perf_counter() - t0)
     return _model, _utils
+
+
+def warmup_vad() -> None:
+    """Açılışta Silero'yu yükle; ilk dinlemede donmayı önler."""
+    _load_silero()
+
+
+def terminate_active_capture() -> None:
+    """Ctrl+C veya servis durdurulurken arecord sürecini kapat."""
+    global _active_arecord_proc
+    proc = _active_arecord_proc
+    _active_arecord_proc = None
+    if proc is None:
+        return
+    if proc.poll() is None:
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=1.5)
+        except Exception:
+            try:
+                proc.kill()
+            except OSError:
+                pass
 
 
 def _effective_silence_samples(
@@ -127,8 +157,10 @@ def _capture_vad_loop(
             return None
 
         mono = read_chunk()
-        if mono is None or len(mono) == 0:
+        if mono is None:
             break
+        if len(mono) == 0:
+            continue
         total += len(mono)
 
         prob = vad_prob(mono)
@@ -186,6 +218,9 @@ def _read_subprocess_stderr(proc: subprocess.Popen[bytes], limit: int = 800) -> 
     if proc.stderr is None:
         return ""
     try:
+        r, _, _ = select.select([proc.stderr], [], [], 0.05)
+        if not r:
+            return ""
         raw = proc.stderr.read(limit)
         return raw.decode("utf-8", errors="replace").strip()
     except Exception:
@@ -224,13 +259,17 @@ def _capture_arecord(
     ]
     logger.info("VAD kayıt backend=arecord device=%s sr=%s", dev, sr)
 
+    _load_silero()
+
     p: subprocess.Popen[bytes] | None = None
     stdout = None
     arecord_failed = False
-    global _last_arecord_device_error
+    global _last_arecord_device_error, _active_arecord_proc
     _last_arecord_device_error = False
+    read_timeout = float(getattr(config, "VAD_ARECORD_READ_TIMEOUT_SEC", 0.25))
     try:
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        _active_arecord_proc = p
         assert p.stdout is not None
         stdout = p.stdout
         time.sleep(0.08)
@@ -246,24 +285,38 @@ def _capture_arecord(
             )
             return None
 
+        read_buf = bytearray()
+
         def read_chunk() -> Optional[np.ndarray]:
-            nonlocal arecord_failed
+            nonlocal arecord_failed, read_buf
+            global _last_arecord_device_error
             if arecord_failed or p is None:
                 return None
-            b = stdout.read(bytes_per_chunk)  # type: ignore[union-attr]
-            if b and len(b) >= bytes_per_chunk:
-                return np.frombuffer(b, dtype=np.int16).copy()
-            if p.poll() is not None:
-                arecord_failed = True
-                _last_arecord_device_error = True
-                alsa_devices.invalidate_working_input()
-                err = _read_subprocess_stderr(p)
-                logger.error(
-                    "arecord akışı kesildi (device=%s). Cihaz meşgul veya yanlış olabilir (PipeWire?). stderr: %s",
-                    dev,
-                    err or "(boş)",
-                )
-            return None
+            while len(read_buf) < bytes_per_chunk:
+                try:
+                    r, _, _ = select.select([stdout], [], [], read_timeout)  # type: ignore[list-item]
+                except (ValueError, OSError):
+                    arecord_failed = True
+                    return None
+                if not r:
+                    return np.array([], dtype=np.int16)
+                chunk = stdout.read(bytes_per_chunk - len(read_buf))  # type: ignore[union-attr]
+                if chunk:
+                    read_buf.extend(chunk)
+                elif p.poll() is not None:
+                    arecord_failed = True
+                    _last_arecord_device_error = True
+                    alsa_devices.invalidate_working_input()
+                    err = _read_subprocess_stderr(p)
+                    logger.error(
+                        "arecord akışı kesildi (device=%s). stderr: %s",
+                        dev,
+                        err or "(boş)",
+                    )
+                    return None
+            out = np.frombuffer(bytes(read_buf[:bytes_per_chunk]), dtype=np.int16).copy()
+            del read_buf[:bytes_per_chunk]
+            return out
 
         return _capture_vad_loop(
             read_chunk,
@@ -279,6 +332,7 @@ def _capture_arecord(
         logger.exception("arecord/VAD hatası: %s", e)
         return None
     finally:
+        _active_arecord_proc = None
         if p is not None:
             try:
                 p.terminate()

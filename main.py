@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import signal
 import sys
 import time
 from datetime import datetime
@@ -15,7 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import config  # noqa: E402
-from modules import battery, bluetooth_session, camera, head, llm, memory, motion, phrases, stt, tts, wake_word  # noqa: E402
+from modules import battery, bluetooth_session, camera, head, llm, memory, motion, phrases, stt, tts, vad, wake_word  # noqa: E402
 from modules import health  # noqa: E402
 
 logger = logging.getLogger("robot_kanka")
@@ -349,6 +350,13 @@ def run_loop() -> None:
         logger.exception("STT arka uç hazırlığı başarısız: %s", e)
         raise
 
+    try:
+        vad.warmup_vad()
+        logger.info("VAD: model hazır.")
+    except Exception as e:
+        logger.exception("VAD modeli yüklenemedi: %s", e)
+        raise
+
     stt.clear_stt_dialogue_hint()
 
     tts.set_output_device(None)
@@ -635,6 +643,7 @@ def run_loop() -> None:
 
         except KeyboardInterrupt:
             logger.info("Kullanıcı durdurdu.")
+            vad.terminate_active_capture()
             stop_batt.set()
             stop_cam.set()
             motion.safe_stop("keyboard_interrupt")
@@ -647,6 +656,19 @@ def run_loop() -> None:
 
 def main() -> None:
     setup_logging()
+
+    def _shutdown_signal(signum: int, _frame) -> None:
+        logger.info("Durdurma sinyali (%s)", signum)
+        vad.terminate_active_capture()
+        try:
+            motion.safe_stop("signal")
+        except Exception:
+            pass
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGINT, _shutdown_signal)
+    signal.signal(signal.SIGTERM, _shutdown_signal)
+
     run_loop()
 
 
