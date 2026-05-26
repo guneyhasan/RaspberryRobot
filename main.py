@@ -429,6 +429,15 @@ def route_intents(text: str) -> str | None:
 
 
 def run_loop() -> None:
+    from modules import alsa_devices
+
+    mic_dev = alsa_devices.resolve_capture_device(rescan=True, allow_wait=True)
+    logger.info(
+        "Mikrofon: %s | %s",
+        mic_dev or "(yok)",
+        alsa_devices.format_capture_device_summary(),
+    )
+
     ok, msg = health.run_preflight()
     if not ok:
         logger.error("Preflight başarısız: %s", msg)

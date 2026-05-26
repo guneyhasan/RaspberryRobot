@@ -16,6 +16,7 @@ Group=@USER@
 SupplementaryGroups=audio
 WorkingDirectory=@ROOT@
 Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/home/@USER@
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 EnvironmentFile=-@ROOT@/.env
 ExecStartPre=@ROOT@/scripts/health_check.sh

@@ -41,7 +41,12 @@ _audio_ready() {
 }
 
 _mic_ready() {
-  arecord -l 2>/dev/null | grep -qi card
+  if arecord -l 2>/dev/null | grep -qi card; then
+    return 0
+  fi
+  # arecord boşken /proc (systemd / USB enumerate gecikmesi)
+  grep -qE '^\s*[0-9]+\s+\[' /proc/asound/cards 2>/dev/null || return 1
+  grep -qiE 'usb|device|mic' /proc/asound/cards 2>/dev/null
 }
 
 _deps_ready() {

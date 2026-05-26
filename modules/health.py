@@ -49,7 +49,7 @@ def check_audio_input_device() -> tuple[bool, str]:
     """Yapılandırılmış veya otomatik seçilen mikrofonu dener."""
     from modules import alsa_devices
 
-    dev = alsa_devices.resolve_capture_device(rescan=True)
+    dev = alsa_devices.resolve_capture_device(rescan=True, allow_wait=True)
     if dev:
         return True, f"mikrofon ok ({dev})"
     summary = alsa_devices.format_capture_device_summary()

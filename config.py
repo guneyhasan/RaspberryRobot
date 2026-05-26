@@ -233,6 +233,9 @@ AUDIO_INPUT_DEVICE = _env_str("AUDIO_INPUT_DEVICE", "")
 # Kart numarası reboot sonrası değişebilir; AUTO_DETECT açıkken alternatifler denenir.
 AUDIO_INPUT_ALSA_DEVICE = _env_str("AUDIO_INPUT_ALSA_DEVICE", "")
 AUDIO_INPUT_AUTO_DETECT = _env_bool("AUDIO_INPUT_AUTO_DETECT", True)
+# Servis/boot: arecord boş veya USB geç gelirse yeniden dene
+MIC_DISCOVERY_RETRIES = int(os.getenv("MIC_DISCOVERY_RETRIES", "15"))
+MIC_DISCOVERY_INTERVAL_SEC = float(os.getenv("MIC_DISCOVERY_INTERVAL_SEC", "2"))
 
 # Ana döngü: konuşma başlaması için bekleme (saniye). arecord anında kapanırsa yine hızlı SKIP olur.
 LISTEN_WAIT_SEC = float(os.getenv("LISTEN_WAIT_SEC", "30"))
