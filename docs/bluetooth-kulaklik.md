@@ -61,6 +61,13 @@ trust AA:BB:CC:DD:EE:FF
 
 `hey kanka` ile konuşma modu açıkken ekstra wake gerekmez.
 
+## Modu kapatıp tekrar açınca PCM boş kalıyorsa
+
+Eski sürüm kapatırken `power off` yapıyordu; ikinci açılışta `bluealsa-aplay -L` uzun süre boş kalabiliyordu.
+Güncel kod varsayılan olarak **yalnızca disconnect** eder (adaptör açık kalır). PCM gelmezse otomatik **disconnect → connect** ve gerekirse `systemctl restart bluealsa` dener.
+
+İstersen tam kapatma: `.env` içinde `BLUETOOTH_POWER_OFF_ON_CLOSE=1`
+
 ## `PCM not found` / ses ikinci cümlede kesiliyorsa
 
 Kulaklık Bluetooth’ta bağlı görünse bile TTS için **bluealsa-aplay -L** içinde bir satır olmalı:

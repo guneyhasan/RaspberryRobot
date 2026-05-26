@@ -192,7 +192,7 @@ def bluealsa_device_for_mac(mac: str) -> str:
     return f"bluealsa:DEV={mac},PROFILE={profile}"
 
 
-def list_bluealsa_playback_pcms() -> list[tuple[str, str]]:
+def list_bluealsa_playback_pcms(*, log: bool = True) -> list[tuple[str, str]]:
     """bluealsa-aplay -L → [(MAC, tam_pcm_adi), ...]"""
     try:
         r = subprocess.run(
@@ -225,14 +225,18 @@ def list_bluealsa_playback_pcms() -> list[tuple[str, str]]:
         seen.add(mac)
         if "a2dp" in pcm.lower() or "PROFILE=" in pcm.upper():
             out.append((mac, pcm))
-    logger.info("bluealsa PCM listesi: %s", [p[1] for p in out])
+    if log:
+        if out:
+            logger.info("bluealsa PCM listesi: %s", [p[1] for p in out])
+        else:
+            logger.debug("bluealsa PCM listesi: (boş)")
     return out
 
 
-def discover_bluealsa_pcm(mac: str | None = None) -> str | None:
+def discover_bluealsa_pcm(mac: str | None = None, *, log: bool = False) -> str | None:
     """Gerçekten açılabilir PCM adını döndürür; yoksa None."""
     mac_n = _normalize_mac(mac) if mac else None
-    pcms = list_bluealsa_playback_pcms()
+    pcms = list_bluealsa_playback_pcms(log=log)
     if not pcms:
         return None
     if mac_n:
@@ -258,8 +262,77 @@ def ensure_adapter_ready() -> tuple[bool, str]:
     if rc == 127:
         return False, "bluetoothctl bulunamadı kanka."
     if "Powered: yes" in out or "succeeded" in out.lower() or rc == 0:
+        settle = float(getattr(config, "BLUETOOTH_ADAPTER_SETTLE_SEC", 1.5))
+        if settle > 0:
+            time.sleep(settle)
         return True, ""
     return False, "Bluetooth adaptörü açılamadı kanka."
+
+
+def _bt_device_info(mac: str) -> str:
+    _, info = _run_bluetoothctl_script(f"info {_normalize_mac(mac)}\n", timeout=10)
+    return info
+
+
+def _bt_is_connected(mac: str) -> bool:
+    return "Connected: yes" in _bt_device_info(mac)
+
+
+def disconnect_device(mac: str | None = None) -> None:
+    """Kulaklığı kes; adaptör açık kalır (yeniden bağlanma için önerilir)."""
+    if mac:
+        _run_bluetoothctl_script(f"disconnect {_normalize_mac(mac)}\n", timeout=12)
+    else:
+        _run_bluetoothctl_script("disconnect\n", timeout=12)
+
+
+def _reconnect_bluetooth_mac(mac: str) -> None:
+    """A2DP/PCM gelmiyorsa disconnect → connect (bluealsa profilini yeniden tetikler)."""
+    mac = _normalize_mac(mac)
+    gap = float(getattr(config, "BLUETOOTH_RECONNECT_GAP_SEC", 2))
+    logger.info("BT A2DP yeniden bağlanıyor: %s", mac)
+    _run_bluetoothctl_script(
+        f"""{_BT_AGENT_SCRIPT}
+power on
+disconnect {mac}
+""",
+        timeout=15,
+    )
+    time.sleep(max(0.5, gap))
+    timeout = float(config.BLUETOOTH_CONNECT_TIMEOUT_SEC)
+    _run_bluetoothctl_script(
+        f"""{_BT_AGENT_SCRIPT}
+trust {mac}
+connect {mac}
+""",
+        timeout=timeout + 5,
+    )
+    time.sleep(max(0.5, gap))
+
+
+def restart_bluealsa_service() -> bool:
+    if not getattr(config, "BLUETOOTH_RESTART_BLUEALSA_ON_RECONNECT", True):
+        return False
+    try:
+        r = subprocess.run(
+            ["systemctl", "restart", "bluealsa"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as e:
+        logger.warning("bluealsa restart başarısız: %s", e)
+        return False
+    if r.returncode != 0:
+        logger.warning(
+            "bluealsa restart rc=%s: %s",
+            r.returncode,
+            ((r.stderr or "") + (r.stdout or ""))[:200],
+        )
+        return False
+    logger.info("bluealsa servisi yeniden başlatıldı")
+    time.sleep(2.0)
+    return True
 
 
 def _bluetoothctl_live_scan(wait_sec: float) -> str:
@@ -353,21 +426,56 @@ def scan_devices(timeout_sec: float | None = None) -> list[tuple[str, str]]:
 
 
 def wait_a2dp_ready(mac: str, timeout_sec: float | None = None) -> bool:
-    """bluealsa-aplay -L içinde PCM görünene kadar bekler (sadece Connected: yes yetmez)."""
+    """bluealsa-aplay -L içinde PCM görünene kadar bekler; gerekirse BT/bluealsa kurtarma."""
     timeout_sec = timeout_sec if timeout_sec is not None else float(
         getattr(config, "BLUETOOTH_A2DP_WAIT_SEC", config.BLUETOOTH_CONNECT_TIMEOUT_SEC)
     )
     mac = _normalize_mac(mac)
-    deadline = time.time() + timeout_sec
+    t0 = time.time()
+    deadline = t0 + timeout_sec
+    reconnects = 0
+    bluealsa_restarted = False
+    poll = 0
+
     while time.time() < deadline:
-        pcm = discover_bluealsa_pcm(mac)
+        pcm = discover_bluealsa_pcm(mac, log=False)
         if pcm:
             _session.bluealsa_pcm = pcm
+            logger.info("A2DP hazır (%0.1fs): %s", time.time() - t0, pcm)
             return True
-        _, info = _run_bluetoothctl_script(f"info {mac}\n", timeout=10)
-        if "Connected: yes" not in info:
-            logger.debug("BT %s henüz Connected: yes değil", mac)
-        time.sleep(1.5)
+
+        poll += 1
+        elapsed = time.time() - t0
+        connected = _bt_is_connected(mac) if poll % 3 == 0 else False
+
+        if connected and reconnects < 1 and elapsed >= 4.0:
+            _reconnect_bluetooth_mac(mac)
+            reconnects += 1
+        elif connected and reconnects == 1 and elapsed >= timeout_sec * 0.45:
+            if restart_bluealsa_service():
+                bluealsa_restarted = True
+            _reconnect_bluetooth_mac(mac)
+            reconnects += 2
+        elif (
+            connected
+            and reconnects >= 2
+            and not bluealsa_restarted
+            and elapsed >= timeout_sec * 0.7
+        ):
+            if restart_bluealsa_service():
+                bluealsa_restarted = True
+                _reconnect_bluetooth_mac(mac)
+                reconnects += 1
+
+        time.sleep(1.2)
+
+    logger.warning(
+        "A2DP/bluealsa PCM hazır değil: %s (%.0fs, reconnects=%s, bluealsa_restart=%s)",
+        mac,
+        time.time() - t0,
+        reconnects,
+        bluealsa_restarted,
+    )
     return False
 
 
@@ -411,16 +519,17 @@ connect {mac}
         out = out + out2
         if "Failed" in out2 and "Connected: yes" not in out2:
             return False, "Bağlantı kurulamadı kanka."
-    if not wait_a2dp_ready(mac, timeout_sec=timeout):
-        logger.warning("A2DP/bluealsa PCM hazır değil: %s (bluealsa-aplay -L boş olabilir)", mac)
+    if not _bt_is_connected(mac):
+        return False, "Bağlantı kurulamadı kanka."
     return True, ""
 
 
 def disconnect_and_power_off(mac: str | None = None) -> None:
-    if mac:
-        mac = _normalize_mac(mac)
-        _run_bluetoothctl_script(f"disconnect {mac}\n", timeout=12)
-    _run_bluetoothctl_script("disconnect\npower off\n", timeout=15)
+    """Varsayılan: yalnızca disconnect (adaptör açık). İsteğe bağlı power off."""
+    disconnect_device(mac)
+    if getattr(config, "BLUETOOTH_POWER_OFF_ON_CLOSE", False):
+        _run_bluetoothctl_script("power off\n", timeout=15)
+        logger.info("BT adaptör kapatıldı (BLUETOOTH_POWER_OFF_ON_CLOSE=1)")
 
 
 def default_speaker_alsa_device() -> str:
@@ -741,6 +850,7 @@ def sync_headphone_from_system() -> list[str]:
 
 
 def _try_auto_connect_paired(paired: list[tuple[str, str]]) -> list[str] | None:
+    """Eşleşmiş cihaza bağlan; A2DP bekleme _finish_connect içinde."""
     """Tek eşleşmiş veya son kullanılan cihaza otomatik bağlan."""
     if not paired:
         return None
