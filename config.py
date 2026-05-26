@@ -217,6 +217,8 @@ LLM_STREAM_ENABLED = _env_bool("LLM_STREAM_ENABLED", True)
 LLM_STREAM_MIN_SENTENCE_CHARS = int(os.getenv("LLM_STREAM_MIN_SENTENCE_CHARS", "12"))
 TTS_SENTENCE_PAUSE_SEC = float(os.getenv("TTS_SENTENCE_PAUSE_SEC", "0.1"))
 TTS_PREFER_PIPER_FOR_NUDGE = _env_bool("TTS_PREFER_PIPER_FOR_NUDGE", True)
+# 0 = Piper (yerel, varsayılan Pi). 1 = internet + OPENAI_API_KEY varsa OpenAI TTS dene.
+TTS_PREFER_ONLINE = _env_bool("TTS_PREFER_ONLINE", False)
 
 # Opsiyonel kısmi STT (deneysel, varsayılan kapalı)
 WHISPER_PARTIAL_HINT = _env_bool("WHISPER_PARTIAL_HINT", False)
@@ -330,7 +332,8 @@ HEAD_NUDGE_DEG = float(os.getenv("HEAD_NUDGE_DEG", "20"))
 OPENAI_API_KEY = _env_str("OPENAI_API_KEY", "")
 MODEL = os.getenv("MODEL", "gpt-4o-mini")
 VISION_MODEL = os.getenv("VISION_MODEL", "gpt-4o")
-TTS_VOICE = os.getenv("TTS_VOICE", "spruce")
+# OpenAI tts-1 sesleri: nova, shimmer, echo, onyx, fable, alloy, ash, sage, coral
+TTS_VOICE = os.getenv("TTS_VOICE", "nova")
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "100"))
 TIMEOUT_SECONDS = float(os.getenv("TIMEOUT_SECONDS", "8"))
 RETRY_ATTEMPTS = int(os.getenv("RETRY_ATTEMPTS", "2"))

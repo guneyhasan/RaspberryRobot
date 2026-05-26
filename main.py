@@ -71,7 +71,7 @@ def _build_llm_messages(user_text: str) -> list[dict[str, str]]:
 def _speak_reply(
     reply: str,
     *,
-    prefer_online: bool = True,
+    prefer_online: bool | None = None,
     force_piper: bool = False,
     tid: str = "",
 ) -> tuple[str, float]:
@@ -90,7 +90,7 @@ def _speak_reply_with_barge_in(
     reply: str,
     *,
     conversation_mode: bool,
-    prefer_online: bool = True,
+    prefer_online: bool | None = None,
     force_piper: bool = False,
     tid: str = "",
 ) -> tuple[str | None, str, float]:
@@ -150,7 +150,7 @@ def _llm_reply_and_speak(
             return
         parts.append(s)
         try:
-            tts.speak(s, prefer_online=True)
+            tts.speak(s)
         except Exception as e:
             if cancel.is_set():
                 return
@@ -481,7 +481,12 @@ def run_loop() -> None:
         or getattr(config, "AUDIO_OUTPUT_ALSA_DEVICE", "")
         or "(ALSA varsayılan)"
     )
-    logger.info("TTS çıkış cihazı: %s", out_dev)
+    logger.info(
+        "TTS: prefer_online=%s | openai_voice=%s | çıkış=%s",
+        getattr(config, "TTS_PREFER_ONLINE", False),
+        getattr(config, "TTS_VOICE", "nova"),
+        out_dev,
+    )
     try:
         kind, duration = tts.speak(config.STARTUP_PHRASE, prefer_online=False)
         logger.info("Açılış TTS tamam: %s | %.1fs | device=%s", kind, duration, out_dev)
@@ -590,7 +595,7 @@ def run_loop() -> None:
                             interrupted, kind, duration = _speak_reply_with_barge_in(
                                 reply,
                                 conversation_mode=conversation_mode,
-                                prefer_online=not force_piper,
+                                prefer_online=False if force_piper else None,
                                 force_piper=force_piper,
                                 tid=tid,
                             )
@@ -637,7 +642,7 @@ def run_loop() -> None:
                 reply = phrases.pick("activate")
                 _log_line("RESPONSE", reply)
                 interrupted, kind, duration = _speak_reply_with_barge_in(
-                    reply, conversation_mode=conversation_mode, prefer_online=True, tid=tid
+                    reply, conversation_mode=conversation_mode, tid=tid
                 )
                 if interrupted:
                     pending_user_text = interrupted
@@ -651,7 +656,7 @@ def run_loop() -> None:
                 reply = phrases.pick("deactivate")
                 _log_line("RESPONSE", reply)
                 interrupted, kind, duration = _speak_reply_with_barge_in(
-                    reply, conversation_mode=True, prefer_online=True, tid=tid
+                    reply, conversation_mode=True, tid=tid
                 )
                 if interrupted:
                     pending_user_text = interrupted
@@ -703,7 +708,7 @@ def run_loop() -> None:
                     _log_line("TTS", f"{tid} | {kind} | bt | duration={duration:.1f}s")
 
                 def _bt_speak_line(line: str) -> tuple[str, float]:
-                    return _speak_reply(line, prefer_online=True, tid=tid)
+                    return _speak_reply(line, tid=tid)
 
                 try:
                     bluetooth_session.speak_replies(
@@ -777,7 +782,6 @@ def run_loop() -> None:
                 interrupted, kind, duration = _speak_reply_with_barge_in(
                     reply,
                     conversation_mode=conversation_mode,
-                    prefer_online=True,
                     tid=tid,
                 )
                 t_tts1 = time.perf_counter()

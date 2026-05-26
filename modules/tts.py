@@ -58,6 +58,16 @@ def _get_client() -> OpenAI:
     return _client
 
 
+_OPENAI_TTS_VOICES = frozenset(
+    {"nova", "shimmer", "echo", "onyx", "fable", "alloy", "ash", "sage", "coral"}
+)
+
+
+def prefer_online_default() -> bool:
+    """config.TTS_PREFER_ONLINE — ana döngü ve speak() varsayılanı."""
+    return bool(getattr(config, "TTS_PREFER_ONLINE", False))
+
+
 def internet_available(host: str = "8.8.8.8", port: int = 53, timeout: float = 2.0) -> bool:
     try:
         socket.setdefaulttimeout(timeout)
@@ -226,10 +236,16 @@ def play_audio_wav_bytes(data: bytes) -> None:
 def synthesize_openai_tts(text: str) -> bytes:
     if not config.OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY tanımlı değil")
+    voice = (config.TTS_VOICE or "nova").strip().lower()
+    if voice not in _OPENAI_TTS_VOICES:
+        raise ValueError(
+            f"Geçersiz TTS_VOICE={config.TTS_VOICE!r}; OpenAI tts-1 için: "
+            f"{', '.join(sorted(_OPENAI_TTS_VOICES))}"
+        )
     client = _get_client()
     resp = client.audio.speech.create(
         model="tts-1",
-        voice=config.TTS_VOICE,
+        voice=voice,
         input=text,
         response_format="mp3",
     )
@@ -422,11 +438,14 @@ def is_speaking() -> bool:
     return _speaking.is_set()
 
 
-def speak(text: str, prefer_online: bool = True) -> tuple[str, float]:
+def speak(text: str, prefer_online: bool | None = None) -> tuple[str, float]:
     """
     Metni sese çevirip oynatır.
-    Returns: ("openai-spruce" | "piper", süre_saniye)
+    prefer_online None ise config.TTS_PREFER_ONLINE kullanılır.
+    Returns: ("openai-<voice>" | "piper", süre_saniye)
     """
+    if prefer_online is None:
+        prefer_online = prefer_online_default()
     t0 = time.perf_counter()
     clear_stop_flag()
     _speaking.set()
@@ -481,10 +500,12 @@ def _speak_inner(text: str, prefer_online: bool, t0: float) -> tuple[str, float]
 def speak_sentences(
     sentences: list[str],
     *,
-    prefer_online: bool = True,
+    prefer_online: bool | None = None,
     pause_between: float | None = None,
 ) -> tuple[str, float]:
     """Cümleleri sırayla seslendirir (ilk cümle daha erken duyulur)."""
+    if prefer_online is None:
+        prefer_online = prefer_online_default()
     pause = pause_between if pause_between is not None else float(getattr(config, "TTS_SENTENCE_PAUSE_SEC", 0.1))
     t0 = time.perf_counter()
     last_kind = "piper"
