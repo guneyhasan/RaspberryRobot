@@ -55,6 +55,8 @@ trust AA:BB:CC:DD:EE:FF
 | kanka bluetooth kulaklık modunu aç | Tek eşleşmiş → otomatik bağlan; çoklu eşleşmişte yalnızca **aktif** (bağlı/yakında) tek cihaz varsa otomatik; birden fazla aktifse numara seç |
 | kanka 2 numaraya bağlan | 2. cihaza bağlan (gerekirse eşleştirir) |
 | kanka 2 numaraya eşleştir | 2. cihazı pair + bağlan |
+| kanka 2 numaranın eşleşmesini kaldır / unpair | 2. cihazı eşleşmeden sil (remove) |
+| Liste okunurken **2 numaraya bağlan** | Robotu keser, seçimi uygular (barge-in) |
 | yeniden tara / tekrar tara | Yakındaki cihazları yeniden listele |
 | kanka bluetooth kulaklık modunu kapat | Hoparlöre dön, BT kapat |
 | kanka bluetooth kulaklığa bağlandım | Elle `bluetoothctl` ile bağlandıysan ses çıkışını bluealsa PCM’den senkronize et |

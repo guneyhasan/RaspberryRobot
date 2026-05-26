@@ -91,6 +91,14 @@
     "Bağlanamadım kanka, bir daha dene.",
     "Kulaklığa bağlanırken sorun oldu kanka."
   ],
+  "bt_error_unpair": [
+    "Eşleşmeyi kaldıramadım kanka.",
+    "Unpair olmadı kanka, bir daha dene."
+  ],
+  "bt_unpaired_ok": [
+    "{name} eşleşmesini kaldırdım kanka.",
+    "{n} numaranın eşleşmesini sildim kanka."
+  ],
   "bt_auto_connected": [
     "Eşleşmiş kulaklığa bağlandım kanka, ses kulaklıktan geliyor.",
     "Tamam kanka, kayıtlı kulaklığa bağlandım."
@@ -120,8 +128,8 @@
     "Diğerleri de bunlar kanka, isimleri henüz yok:"
   ],
   "bt_await_pair_or_connect": [
-    "Numara söyle kanka. Bağlanmak için örneğin bir numaraya bağlan. İlk kez eşleştirmek için iki numaraya eşleştir.",
-    "Hangi numara kanka? Bağlan veya eşleştir de."
+    "Numara söyle kanka. Bağlan, eşleştir veya eşleşmeyi kaldır. Örneğin iki numaraya bağlan, üç numaranın eşleşmesini kaldır.",
+    "Hangi numara kanka? Bağlan, eşleştir veya unpair de."
   ],
   "bt_rescan_ok": [
     "Tamam kanka, yeniden taradım.",

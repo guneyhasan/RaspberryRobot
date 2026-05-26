@@ -5,7 +5,9 @@ import json
 import logging
 import re
 import subprocess
+import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -534,6 +536,94 @@ trust {mac}
     return True, ""
 
 
+def unpair_mac(mac: str) -> tuple[bool, str]:
+    mac = _normalize_mac(mac)
+    if _session.connected_mac == mac:
+        disconnect_device(mac)
+        _session.connected_mac = None
+        _session.connected_index = None
+        _session.audio_on_headphone = False
+        _session.phase = "awaiting"
+        set_speaker_output()
+
+    script = f"""{_BT_AGENT_SCRIPT}
+power on
+disconnect {mac}
+remove {mac}
+"""
+    _, out = _run_bluetoothctl_script(script, timeout=25)
+    ok = (
+        "Device has been removed" in out
+        or "[DEL] Device" in out
+        or "Removed" in out
+        or ("Failed" not in out and "remove" in out.lower())
+    )
+    if "Failed" in out and not ok:
+        return False, "Eşleşmeyi kaldıramadım kanka."
+
+    if _load_last_mac() == mac:
+        try:
+            p = _last_device_path()
+            if p.is_file():
+                p.unlink()
+        except OSError:
+            pass
+
+    return True, ""
+
+
+def unpair_by_index(index: int) -> list[str]:
+    s = _session
+    if not s.active:
+        return [phrases.pick("bt_error_not_active", fallback="Önce kulaklık modunu aç kanka.")]
+
+    if index < 1 or index > len(s.devices):
+        return [
+            phrases.pick(
+                "bt_error_invalid_number",
+                fallback=f"Geçersiz numara kanka. 1 ile {len(s.devices)} arasında söyle.",
+            )
+        ]
+
+    _num, name, mac = s.devices[index - 1]
+    ok, err = unpair_mac(mac)
+    if not ok:
+        return [err or phrases.pick("bt_error_unpair", fallback="Eşleşmeyi kaldıramadım kanka.")]
+
+    paired = list_paired_devices()
+    s.devices = _numbered_list(paired) if paired else []
+    s.phase = "awaiting"
+    s.discovered_only = False
+
+    msg = (
+        phrases.pick(
+            "bt_unpaired_ok",
+            fallback="{name} eşleşmesini kaldırdım kanka.",
+        )
+        .replace("{name}", name)
+        .replace("{n}", str(index))
+    )
+    if not paired:
+        return [
+            msg,
+            phrases.pick(
+                "bt_error_no_devices",
+                fallback="Başka eşleşmiş cihaz kalmadı kanka.",
+            ),
+            phrases.pick(
+                "bt_pair_hint",
+                fallback="Yeni kulaklık için eşleştirme moduna al, sonra yeniden tara.",
+            ),
+        ]
+    return [
+        msg,
+        phrases.pick(
+            "bt_await_number",
+            fallback="Başka numara söyleyebilirsin kanka.",
+        ),
+    ]
+
+
 def connect_mac(mac: str, *, try_pair: bool = True) -> tuple[bool, str]:
     mac = _normalize_mac(mac)
     if try_pair and not _mac_is_paired(mac):
@@ -681,6 +771,12 @@ def _parse_device_number(text: str) -> int | None:
     m = re.search(r"(\d+)\s*numaraya\s+eslestir", low)
     if m:
         return int(m.group(1))
+    m = re.search(r"(\d+)\s*numarayi\s+kaldir", low)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"(\d+)\s*numarayi\s+unpair", low)
+    if m:
+        return int(m.group(1))
     m = re.search(r"(\d+)\.\s*numara", low)
     if m:
         return int(m.group(1))
@@ -696,10 +792,54 @@ def _parse_device_number(text: str) -> int | None:
             return num
         if re.search(rf"numara\s+{word}\b", low):
             return num
+        if re.search(rf"\b{word}\s+numarayi\s+kaldir", low):
+            return num
+    if re.fullmatch(r"[a-z]+", low) and low in _TURKISH_NUMBERS:
+        return _TURKISH_NUMBERS[low]
     return None
 
 
+def _wants_unpair(text: str) -> bool:
+    low = _norm_text(text)
+    if "unpair" in low:
+        return True
+    if any(
+        p in low
+        for p in (
+            "eslesmeyi kaldir",
+            "eslesmeyi sil",
+            "eslesmeyi kopar",
+            "eslesmesini kaldir",
+            "eslesmesini sil",
+            "eslestirmeyi kaldir",
+            "eslestirmeyi sil",
+            "cihazi kaldir",
+            "cihazi sil",
+            "kaldir esles",
+            "sil esles",
+        )
+    ):
+        return True
+    if "kaldir" in low and "eslestir" not in low and _parse_device_number(text) is not None:
+        return True
+    if "sil" in low and "eslestir" not in low and _parse_device_number(text) is not None:
+        return True
+    return False
+
+
+def is_selection_utterance(text: str) -> bool:
+    """Liste okunurken kesip seçim yapılabilir mi?"""
+    if _parse_device_number(text) is not None:
+        return True
+    if _wants_unpair(text) or _wants_pair(text):
+        return True
+    low = _norm_text(text)
+    return any(k in low for k in ("baglan", "numara", "unpair", "eslestir", "kaldir"))
+
+
 def _wants_pair(text: str) -> bool:
+    if _wants_unpair(text):
+        return False
     low = _norm_text(text)
     return any(
         k in low
@@ -801,6 +941,129 @@ def _list_replies(intro_key: str, devices: list[tuple[int, str, str]], *, scan_h
             )
         )
     return replies
+
+
+def _is_device_line(line: str) -> bool:
+    t = (line or "").strip()
+    return bool(re.match(r"^\d+\.", t)) or "isimsiz bluetooth cihazi" in _norm_text(t)
+
+
+def _list_has_device_lines(replies: list[str]) -> bool:
+    return any(_is_device_line(line) for line in replies)
+
+
+def _should_barge_in_list(replies: list[str]) -> bool:
+    if not bool(getattr(config, "BLUETOOTH_LIST_BARGE_IN", True)):
+        return False
+    if not is_awaiting_selection():
+        return False
+    return _list_has_device_lines(replies) and len(replies) >= 3
+
+
+def _speak_line_with_barge_in(
+    line: str,
+    speak_line: Callable[[str], tuple[str, float]],
+    listen_timeout: float,
+) -> str | None:
+    from modules import stt
+
+    tts.clear_stop_flag()
+    done = threading.Event()
+    errors: list[BaseException] = []
+
+    def _runner() -> None:
+        try:
+            speak_line(line)
+        except BaseException as e:
+            errors.append(e)
+        finally:
+            done.set()
+
+    th = threading.Thread(target=_runner, daemon=True, name="bt-tts-line")
+    th.start()
+    line_deadline = time.time() + 120.0
+
+    while not done.is_set() and time.time() < line_deadline:
+        try:
+            text, _conf = stt.listen_for_speech_and_transcribe(
+                min(listen_timeout, 2.0),
+                require_wake=False,
+            )
+        except Exception as e:
+            logger.debug("BT barge-in dinleme: %s", e)
+            text = ""
+        if text.strip() and is_selection_utterance(text):
+            logger.info("BT liste kesildi, seçim: %r", text[:100])
+            tts.stop_speaking()
+            done.wait(timeout=3.0)
+            return text.strip()
+        if done.wait(timeout=0.15):
+            break
+
+    th.join(timeout=1.0)
+    if errors:
+        err = errors[0]
+        err_name = type(err).__name__
+        if err_name != "TtsInterrupted" and "kesildi" not in str(err).lower():
+            raise err
+    return None
+
+
+def speak_replies(
+    replies: list[str],
+    *,
+    skip_first: bool = False,
+    speak_line: Callable[[str], tuple[str, float]],
+    on_response: Callable[[str, int, int], None] | None = None,
+    on_tts: Callable[[str, float], None] | None = None,
+) -> None:
+    """
+    BT yanıtlarını sırayla oku. Liste modunda kullanıcı araya girip numara/unpair diyebilir.
+    """
+    listen_sec = float(getattr(config, "BLUETOOTH_BARGE_IN_LISTEN_SEC", 2.0))
+    barge_in = _should_barge_in_list(replies)
+    total = len(replies)
+    idx = 0
+
+    while idx < total:
+        line = replies[idx]
+        if not line.strip():
+            idx += 1
+            continue
+        if skip_first and idx == 0:
+            if on_response:
+                on_response(f"{line} (anlık TTS, atlandı)", idx + 1, total)
+            idx += 1
+            continue
+
+        if on_response:
+            on_response(line, idx + 1, total)
+
+        use_barge = barge_in and _is_device_line(line)
+        interrupted: str | None = None
+        try:
+            if use_barge:
+                interrupted = _speak_line_with_barge_in(line, speak_line, listen_sec)
+            else:
+                kind, duration = speak_line(line)
+                if on_tts:
+                    on_tts(kind, duration)
+        except Exception as e:
+            logger.warning("BT TTS: %s", e)
+
+        if interrupted:
+            handled, follow = handle_turn(interrupted)
+            if handled and follow:
+                speak_replies(
+                    follow,
+                    skip_first=False,
+                    speak_line=speak_line,
+                    on_response=on_response,
+                    on_tts=on_tts,
+                )
+            return
+
+        idx += 1
 
 
 def _finish_connect(mac: str, name: str, index: int | None = None) -> list[str]:
@@ -1188,10 +1451,12 @@ def handle_turn(text: str) -> tuple[bool, list[str]]:
 
     num = _parse_device_number(text)
     if num is not None and _session.active:
+        if _wants_unpair(text):
+            return True, unpair_by_index(num)
         if _wants_pair(text):
             return True, pair_and_connect_by_index(num)
         if _session.phase in ("awaiting", "connected") or "baglan" in _norm_text(text):
-            return True, connect_by_index(num, force_pair=_wants_pair(text))
+            return True, connect_by_index(num, force_pair=False)
 
     if _session.active and _session.phase == "awaiting":
         low = _norm_text(text)

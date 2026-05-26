@@ -570,23 +570,28 @@ def run_loop() -> None:
                 memory.append_conversation_line("Kullanıcı", text)
                 memory.append_conversation_line("Kanka", full_bt)
                 stt.record_dialogue_turn_for_stt(text, full_bt)
-                for i, line in enumerate(bt_replies):
-                    if not line.strip():
-                        continue
-                    if skip_open_ack and i == 0:
-                        _log_line(
-                            "RESPONSE",
-                            f"{line} (anlık TTS, atlandı)"
-                            if len(bt_replies) == 1
-                            else f"[{i + 1}/{len(bt_replies)}] {line} (anlık TTS, atlandı)",
-                        )
-                        continue
-                    _log_line("RESPONSE", line if len(bt_replies) == 1 else f"[{i + 1}/{len(bt_replies)}] {line}")
-                    try:
-                        kind, duration = _speak_reply(line, prefer_online=True, tid=tid)
-                        _log_line("TTS", f"{tid} | {kind} | bt | duration={duration:.1f}s")
-                    except Exception as e:
-                        _log_line("TTS_ERR", f"{tid} | bt line {i + 1}: {type(e).__name__}: {e}")
+                def _bt_on_response(line: str, i: int, total: int) -> None:
+                    _log_line(
+                        "RESPONSE",
+                        line if total == 1 else f"[{i}/{total}] {line}",
+                    )
+
+                def _bt_on_tts(kind: str, duration: float) -> None:
+                    _log_line("TTS", f"{tid} | {kind} | bt | duration={duration:.1f}s")
+
+                def _bt_speak_line(line: str) -> tuple[str, float]:
+                    return _speak_reply(line, prefer_online=True, tid=tid)
+
+                try:
+                    bluetooth_session.speak_replies(
+                        bt_replies,
+                        skip_first=skip_open_ack,
+                        speak_line=_bt_speak_line,
+                        on_response=_bt_on_response,
+                        on_tts=_bt_on_tts,
+                    )
+                except Exception as e:
+                    _log_line("TTS_ERR", f"{tid} | bt: {type(e).__name__}: {e}")
                 continue
 
             t_route0 = time.perf_counter()

@@ -20,6 +20,13 @@ _client: Optional[OpenAI] = None
 _speaking = threading.Event()
 _runtime_output_device: Optional[str] = None
 _output_lock = threading.Lock()
+_stop_flag = threading.Event()
+_child_procs: list[subprocess.Popen] = []
+_child_lock = threading.Lock()
+
+
+class TtsInterrupted(Exception):
+    """stop_speaking() ile kesildi."""
 
 
 def set_output_device(device: str | None) -> None:
@@ -97,9 +104,67 @@ def _aplay_cmd_base(*, rate: int | None = None, channels: int = 1, raw: bool = F
     return cmd
 
 
+def _register_child(proc: subprocess.Popen) -> None:
+    with _child_lock:
+        _child_procs.append(proc)
+
+
+def _unregister_child(proc: subprocess.Popen) -> None:
+    with _child_lock:
+        try:
+            _child_procs.remove(proc)
+        except ValueError:
+            pass
+
+
+def stop_speaking() -> None:
+    """Çalan TTS'i kes (Bluetooth liste barge-in vb.)."""
+    _stop_flag.set()
+    with _child_lock:
+        procs = list(_child_procs)
+    for p in procs:
+        try:
+            p.kill()
+        except OSError:
+            pass
+    _speaking.clear()
+
+
+def clear_stop_flag() -> None:
+    _stop_flag.clear()
+
+
+def _wait_proc(proc: subprocess.Popen, *, timeout: float = 120) -> int:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if _stop_flag.is_set():
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            raise TtsInterrupted("TTS kesildi")
+        rc = proc.poll()
+        if rc is not None:
+            return rc
+        time.sleep(0.05)
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    raise RuntimeError("aplay timeout")
+
+
 def _run_aplay(cmd: list[str], *, context: str = "aplay", allow_fallback: bool = True) -> None:
     dev_before = _effective_output_device() or ""
-    r = subprocess.run(cmd, check=False, capture_output=True)
+    p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    _register_child(p)
+    try:
+        rc = _wait_proc(p, timeout=120)
+    except TtsInterrupted:
+        raise
+    finally:
+        _unregister_child(p)
+    r = subprocess.CompletedProcess(cmd, rc, stderr=p.stderr.read() if p.stderr else b"")
     if r.returncode == 0:
         return
     err = (r.stderr or b"").decode("utf-8", errors="replace").strip()
@@ -115,11 +180,18 @@ def _run_aplay(cmd: list[str], *, context: str = "aplay", allow_fallback: bool =
             dev_before,
         )
         set_output_device(fb)
-        r2 = subprocess.run(_rebuild_aplay_cmd(cmd, fb), check=False, capture_output=True)
-        if r2.returncode == 0:
+        p2 = subprocess.Popen(_rebuild_aplay_cmd(cmd, fb), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        _register_child(p2)
+        try:
+            rc2 = _wait_proc(p2, timeout=120)
+        except TtsInterrupted:
+            raise
+        finally:
+            _unregister_child(p2)
+        if rc2 == 0:
             return
-        err = (r2.stderr or b"").decode("utf-8", errors="replace").strip()
-        rc = r2.returncode
+        err = (p2.stderr.read() if p2.stderr else b"").decode("utf-8", errors="replace").strip()
+        rc = rc2
         dev = fb
 
     logger.error(
@@ -250,6 +322,8 @@ def _speak_piper_streaming(text: str, *, _allow_bt_fallback: bool = True) -> flo
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
         )
+        _register_child(p_piper)
+        _register_child(p_aplay)
         # Parent'ın read-end referansını kapat; aplay sahiplensin, EOF doğru gelsin.
         assert p_piper.stdout is not None
         p_piper.stdout.close()
@@ -258,8 +332,12 @@ def _speak_piper_streaming(text: str, *, _allow_bt_fallback: bool = True) -> flo
         p_piper.stdin.write(text.encode("utf-8"))
         p_piper.stdin.close()
 
-        rc_piper = p_piper.wait(timeout=30)
-        rc_aplay = p_aplay.wait(timeout=30)
+        try:
+            rc_piper = _wait_proc(p_piper, timeout=30)
+            rc_aplay = _wait_proc(p_aplay, timeout=30)
+        finally:
+            _unregister_child(p_piper)
+            _unregister_child(p_aplay)
 
         if rc_piper != 0:
             stderr_b = b""
@@ -298,6 +376,8 @@ def _speak_piper_streaming(text: str, *, _allow_bt_fallback: bool = True) -> flo
                 except Exception:
                     pass
         raise RuntimeError("Piper streaming timeout")
+    except TtsInterrupted:
+        raise
     except RuntimeError:
         raise
     except Exception as exc:
@@ -348,10 +428,12 @@ def speak(text: str, prefer_online: bool = True) -> tuple[str, float]:
     Returns: ("openai-spruce" | "piper", süre_saniye)
     """
     t0 = time.perf_counter()
+    clear_stop_flag()
     _speaking.set()
-    used = "piper"
     try:
         return _speak_inner(text, prefer_online, t0)
+    except TtsInterrupted:
+        return "piper", time.perf_counter() - t0
     finally:
         _speaking.clear()
 
