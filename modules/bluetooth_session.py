@@ -1608,6 +1608,15 @@ def open_mode() -> list[str]:
     if not is_enabled():
         return [phrases.pick("bt_error_disabled", fallback="Bluetooth modu kapalı kanka.")]
 
+    try:
+        from modules import wifi_session
+
+        blocked = wifi_session.notify_bt_open_blocked()
+        if blocked:
+            return [blocked]
+    except Exception:
+        pass
+
     _open_ack_spoken = False
     _session.pending_action = None
     ack = phrases.pick(

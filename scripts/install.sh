@@ -53,7 +53,8 @@ sudo apt-get install -y \
   libportaudio2 portaudio19-dev \
   ffmpeg \
   cmake build-essential \
-  bluez bluez-tools
+  bluez bluez-tools \
+  network-manager
 
 echo "[install] BlueALSA (kulaklık sesi) — ayrı script, paket adı OS'e göre değişir..."
 bash "${SCRIPT_DIR}/setup_bluetooth_audio.sh" || echo "[install] BlueALSA kurulamadı; docs/bluetooth-kulaklik.md"
@@ -118,6 +119,10 @@ sudo systemctl enable robot-kanka.service
 echo "[install] Şifresiz kapanma (sudo poweroff)..."
 bash "${SCRIPT_DIR}/setup_poweroff_sudo.sh" "${PI_USER}" || \
   echo "[install] UYARI: setup_poweroff_sudo.sh başarısız — sesli kapanma şifre sorabilir."
+
+echo "[install] Şifresiz WiFi (sudo nmcli)..."
+bash "${SCRIPT_DIR}/setup_wifi_sudo.sh" "${PI_USER}" || \
+  echo "[install] UYARI: setup_wifi_sudo.sh başarısız — sesli WiFi şifre sorabilir."
 
 echo "[install] Servis kuruldu. Başlat: sudo systemctl start robot-kanka"
 echo "[install] Log: journalctl -u robot-kanka -f  |  /var/log/robot-kanka.log"

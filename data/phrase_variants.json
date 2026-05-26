@@ -146,5 +146,85 @@
   "bt_error_pair": [
     "Eşleştiremedim kanka, kulaklık eşleştirme modunda mı?",
     "Pair olmadı kanka, bir daha dene."
+  ],
+  "wifi_open": [
+    "Tamam kanka, wifi ağlarına bakıyorum.",
+    "Wifi modunu açtım kanka, yakındaki ağları tarıyorum."
+  ],
+  "wifi_list_intro": [
+    "Yakındaki wifi ağları kanka:",
+    "Şu ağları buldum kanka:"
+  ],
+  "wifi_list_total": [
+    "Toplam {n} ağ buldum kanka.",
+    "Taramada {n} wifi ağı çıktı kanka."
+  ],
+  "wifi_await_number": [
+    "Hangi numaraya bağlanmak istiyorsun kanka?",
+    "Numara veya ağ adı söyle kanka."
+  ],
+  "wifi_await_password": [
+    "Şifreyi söyle kanka, bağlayayım.",
+    "Bu ağ şifreli kanka, wifi şifresini söyle."
+  ],
+  "wifi_password_confirm": [
+    "Şifren {n} karakter. Onaylıyor musun? Evet de veya şifreyi tekrar söyle.",
+    "Tamam kanka, {n} karakterlik şifre. Bağlanayım mı?"
+  ],
+  "wifi_password_cancelled": [
+    "Tamam kanka, şifreyi iptal ettim. Numara veya ağ adı söyle.",
+    "Şifre iptal, başka ağ seçebilirsin kanka."
+  ],
+  "wifi_connected": [
+    "{ssid} ağına bağlandım kanka.",
+    "Tamam kanka, {ssid} wifi'sine bağlandım."
+  ],
+  "wifi_closed": [
+    "Wifi modunu kapattım kanka.",
+    "Tamam kanka, wifi modundan çıktım."
+  ],
+  "wifi_rescan_ok": [
+    "Tamam kanka, yeniden taradım.",
+    "Bir daha taradım kanka."
+  ],
+  "wifi_error_disabled": [
+    "Wifi modu kapalı kanka.",
+    "Bu özellik şu an devre dışı kanka."
+  ],
+  "wifi_error_no_backend": [
+    "WiFi yönetimi kurulu değil kanka. network-manager veya wpa_cli gerekli.",
+    "Sistemde nmcli yok kanka, önce network-manager kur."
+  ],
+  "wifi_error_scan": [
+    "Tarama yapamadım kanka.",
+    "Wifi taraması başarısız kanka."
+  ],
+  "wifi_error_no_networks": [
+    "Hiç wifi ağı görünmüyor kanka. Yeniden tara de.",
+    "Yakında ağ yok gibi kanka, tekrar tara."
+  ],
+  "wifi_error_not_active": [
+    "Önce wifi modunu aç kanka.",
+    "Wifi modu açık değil kanka."
+  ],
+  "wifi_error_invalid_number": [
+    "Geçersiz numara kanka, listeden bir numara söyle.",
+    "O numara yok kanka, listeyi tekrar dinle."
+  ],
+  "wifi_error_connect": [
+    "Bağlanamadım kanka, bir daha dene veya başka ağ seç.",
+    "Wifi bağlantısı olmadı kanka."
+  ],
+  "wifi_error_connect_password": [
+    "Bağlanamadım kanka, şifre yanlış olabilir. Şifreyi tekrar söyle.",
+    "Şifre tutmadı kanka, tekrar dene."
+  ],
+  "wifi_error_bt_active": [
+    "Önce bluetooth kulaklık modunu kapat kanka.",
+    "Bluetooth modu açık kanka, önce onu kapat."
+  ],
+  "wifi_error_wifi_active": [
+    "Önce wifi modunu kapat kanka.",
+    "Wifi modu açık kanka, önce onu kapat."
   ]
 }

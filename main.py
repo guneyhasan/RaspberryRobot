@@ -17,7 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import config  # noqa: E402
-from modules import battery, barge_in, bluetooth_session, camera, head, llm, memory, motion, phrases, stt, tts, vad, wake_word  # noqa: E402
+from modules import battery, barge_in, bluetooth_session, camera, head, llm, memory, motion, phrases, stt, tts, vad, wake_word, wifi_session  # noqa: E402
 from modules import health  # noqa: E402
 
 logger = logging.getLogger("robot_kanka")
@@ -688,7 +688,47 @@ def run_loop() -> None:
             else:
                 _log_line("MODE", f"{tid} | conversation_mode=on | wake_check=skipped")
 
-            _log_line("HEARD", f"{text} | confidence: {conf:.2f}")
+            wifi_password_turn = wifi_session.is_password_turn()
+            heard_preview = "[wifi şifre girişi]" if wifi_password_turn else text
+            _log_line("HEARD", f"{heard_preview} | confidence: {conf:.2f}")
+
+            wifi_handled, wifi_replies = wifi_session.handle_turn(text)
+            if wifi_handled:
+                _log_line(
+                    "WIFI",
+                    f"{tid} | replies={len(wifi_replies)} | phase={wifi_session.session().phase}",
+                )
+                skip_wifi_ack = wifi_session.consume_open_ack_skip()
+                user_log = "[wifi şifre girişi]" if wifi_password_turn else text
+                full_wifi = " ".join(wifi_replies)
+                memory.append_conversation_line("Kullanıcı", user_log)
+                memory.append_conversation_line("Kanka", full_wifi)
+                if not wifi_password_turn:
+                    stt.record_dialogue_turn_for_stt(user_log, full_wifi)
+
+                def _wifi_on_response(line: str, i: int, total: int) -> None:
+                    _log_line(
+                        "RESPONSE",
+                        line if total == 1 else f"[{i}/{total}] {line}",
+                    )
+
+                def _wifi_on_tts(kind: str, duration: float) -> None:
+                    _log_line("TTS", f"{tid} | {kind} | wifi | duration={duration:.1f}s")
+
+                def _wifi_speak_line(line: str) -> tuple[str, float]:
+                    return _speak_reply(line, tid=tid)
+
+                try:
+                    wifi_session.speak_replies(
+                        wifi_replies,
+                        skip_first=skip_wifi_ack,
+                        speak_line=_wifi_speak_line,
+                        on_response=_wifi_on_response,
+                        on_tts=_wifi_on_tts,
+                    )
+                except Exception as e:
+                    _log_line("TTS_ERR", f"{tid} | wifi: {type(e).__name__}: {e}")
+                continue
 
             bt_handled, bt_replies = bluetooth_session.handle_turn(text)
             if bt_handled:

@@ -282,6 +282,17 @@ BLUETOOTH_AGENT_DAEMON = _env_bool("BLUETOOTH_AGENT_DAEMON", True)
 # Boş bırakılırsa AUDIO_OUTPUT_ALSA_DEVICE kullanılır (ör. plughw:0,0)
 BLUETOOTH_SPEAKER_ALSA_DEVICE = _env_str("BLUETOOTH_SPEAKER_ALSA_DEVICE", "")
 
+# Sesli WiFi modu (nmcli / wpa_cli)
+WIFI_ENABLED = _env_bool("WIFI_ENABLED", True)
+WIFI_SCAN_SEC = float(os.getenv("WIFI_SCAN_SEC", "4"))
+WIFI_CONNECT_TIMEOUT_SEC = float(os.getenv("WIFI_CONNECT_TIMEOUT_SEC", "45"))
+# 0 = tüm ağları listele; >0 üst sınır
+WIFI_MAX_LIST = int(os.getenv("WIFI_MAX_LIST", "10"))
+# Şifre söylendikten sonra karakter sayısı ile onay iste (0/1)
+WIFI_PASSWORD_CONFIRM = _env_bool("WIFI_PASSWORD_CONFIRM", False)
+# wpa_cli yedek arayüz adı
+WIFI_WPA_INTERFACE = _env_str("WIFI_WPA_INTERFACE", "wlan0")
+
 # Battery monitoring (Robot-HAT voltage → %).
 # 2S Li-ion pack typical: 8.4V full, ~6.4V empty (under load değişir).
 BATTERY_VOLTAGE_MIN = float(os.getenv("BATTERY_VOLTAGE_MIN", "6.4"))
