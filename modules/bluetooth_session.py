@@ -517,25 +517,142 @@ def wait_a2dp_ready(mac: str, timeout_sec: float | None = None) -> bool:
     return False
 
 
+def _device_info(mac: str) -> str:
+    _, info = _run_bluetoothctl_script(f"info {_normalize_mac(mac)}\n", timeout=12)
+    return info
+
+
+def _output_indicates_paired(mac: str, output: str) -> bool:
+    mac_u = _normalize_mac(mac)
+    if "Paired: yes" in output:
+        if mac_u.replace(":", "") in output.replace(":", "").upper():
+            return True
+        if f"Device {mac_u}" in output or f"Device {mac_u.lower()}" in output.lower():
+            return True
+    if "Pairing successful" in output or "AlreadyExists" in output or "Already Exists" in output:
+        return True
+    return False
+
+
 def _mac_is_paired(mac: str) -> bool:
+    return "Paired: yes" in _device_info(mac)
+
+
+def _bluetoothctl_live_pair(mac: str, timeout_sec: float | None = None) -> tuple[bool, str]:
+    """
+    Tek bluetoothctl oturumunda pair → trust (terminaldeki gibi).
+    Kısa script + quit, eşleştirme bitmeden agent kapanınca başarısız oluyordu.
+    """
+    timeout_sec = timeout_sec if timeout_sec is not None else float(
+        getattr(config, "BLUETOOTH_PAIR_TIMEOUT_SEC", 60)
+    )
+    scan_sec = float(getattr(config, "BLUETOOTH_PAIR_SCAN_SEC", 5))
     mac = _normalize_mac(mac)
-    return any(m == mac for m, _ in list_paired_devices())
+    proc: subprocess.Popen[str] | None = None
+    lines: list[str] = []
+
+    try:
+        proc = subprocess.Popen(
+            ["bluetoothctl"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        if proc.stdin is None or proc.stdout is None:
+            return False, ""
+
+        def send(cmd: str, pause: float = 0.0) -> None:
+            proc.stdin.write(cmd)
+            proc.stdin.flush()
+            if pause > 0:
+                time.sleep(pause)
+
+        send(_BT_AGENT_SCRIPT, 0.4)
+        send("power on\n", 1.0)
+        if scan_sec > 0:
+            send("scan on\n", scan_sec)
+            send("scan off\n", 0.6)
+        send(f"pair {mac}\n", 0.0)
+
+        deadline = time.time() + timeout_sec
+        pair_done = False
+        while time.time() < deadline:
+            line = proc.stdout.readline()
+            if not line:
+                if proc.poll() is not None:
+                    break
+                time.sleep(0.15)
+                continue
+            lines.append(line)
+            logger.info("BT pair: %s", line.strip())
+            joined = "".join(lines)
+            if _output_indicates_paired(mac, joined):
+                pair_done = True
+                break
+            if re.search(r"(Authentication Failed|org\.bluez\.Error)", line, re.I):
+                break
+            if re.search(r"Failed to pair|Pairing failed", line, re.I):
+                break
+
+        send(f"trust {mac}\n", 0.8)
+        send(f"info {mac}\n", 1.2)
+        drain_until = time.time() + 4.0
+        while time.time() < drain_until:
+            line = proc.stdout.readline()
+            if not line:
+                if proc.poll() is not None:
+                    break
+                time.sleep(0.1)
+                continue
+            lines.append(line)
+
+        send("quit\n", 0.1)
+        try:
+            proc.communicate(timeout=8)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+        out = "".join(lines)
+        if pair_done or _output_indicates_paired(mac, out) or _mac_is_paired(mac):
+            logger.info("BT pair başarılı: %s", mac)
+            return True, out
+
+        logger.warning("BT pair başarısız %s | son çıktı: %s", mac, out[-600:])
+        return False, out
+    except Exception as e:
+        logger.warning("BT live pair hata: %s", e)
+        if proc is not None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        return False, ""
 
 
 def pair_mac(mac: str) -> tuple[bool, str]:
     mac = _normalize_mac(mac)
-    timeout = float(getattr(config, "BLUETOOTH_PAIR_TIMEOUT_SEC", 45))
-    script = f"""{_BT_AGENT_SCRIPT}
+    if _mac_is_paired(mac):
+        logger.info("BT %s zaten eşleşmiş, trust yenileniyor", mac)
+        _run_bluetoothctl_script(
+            f"""{_BT_AGENT_SCRIPT}
 power on
-pair {mac}
 trust {mac}
-"""
-    _, out = _run_bluetoothctl_script(script, timeout=timeout)
-    if "Pairing successful" in out or "AlreadyExists" in out or "succeeded" in out.lower():
+""",
+            timeout=15,
+        )
         return True, ""
-    if "Failed" in out and "Paired: yes" not in out:
-        return False, "Eşleştirme tamamlanamadı kanka. Kulaklık eşleştirme modunda mı?"
-    return True, ""
+
+    ok, _out = _bluetoothctl_live_pair(mac)
+    if ok:
+        return True, ""
+    if _mac_is_paired(mac):
+        return True, ""
+    return False, (
+        "Eşleştirme tamamlanamadı kanka. Kulaklığı eşleştirme modunda tut, "
+        "telefonda eski eşleşmeyi sil, sonra yeniden dene."
+    )
 
 
 def unpair_mac(mac: str) -> tuple[bool, str]:
@@ -876,15 +993,22 @@ def _wants_pair(text: str) -> bool:
     if _wants_unpair_direct(text) or _matches_unpair_menu(text):
         return False
     low = _norm_text(text)
-    return any(
+    if any(
         k in low
         for k in (
             "eslestir",
             "esle",
             "pair",
             "bagla ve eslestir",
+            "numaraya eslestir",
+            "ile eslestir",
         )
-    )
+    ):
+        return True
+    if _parse_device_number(text) is not None and _session.discovered_only and "baglan" not in low:
+        if any(k in low for k in ("eslestir", "esle", "pair", "yeni", "ilk")):
+            return True
+    return False
 
 
 def _matches_open(text: str) -> bool:
@@ -1452,9 +1576,11 @@ def pair_and_connect_by_index(index: int) -> list[str]:
         ]
 
     _num, name, mac = s.devices[index - 1]
+    logger.info("BT sesli eşleştir+baglan: #%s %s (%s)", index, name, mac)
     ok, err = pair_mac(mac)
     if not ok:
         return [err or phrases.pick("bt_error_pair", fallback="Eşleştiremedim kanka.")]
+    s.discovered_only = False
     ok, err = connect_mac(mac, try_pair=False)
     if not ok:
         return [err or phrases.pick("bt_error_connect", fallback="Eşleştirdim ama bağlanamadım kanka.")]
@@ -1477,7 +1603,11 @@ def connect_by_index(index: int, *, force_pair: bool = False) -> list[str]:
 
     _num, name, mac = s.devices[index - 1]
     try_pair = force_pair or (s.discovered_only and not _mac_is_paired(mac))
+    if try_pair:
+        logger.info("BT sesli bağlan (önce eşleştir): #%s %s (%s)", index, name, mac)
     ok, err = connect_mac(mac, try_pair=try_pair)
+    if ok and try_pair:
+        s.discovered_only = False
     if not ok:
         return [err or phrases.pick("bt_error_connect", fallback="Bağlanamadım kanka, bir daha dene.")]
 
@@ -1547,7 +1677,10 @@ def handle_turn(text: str) -> tuple[bool, list[str]]:
             return True, pair_and_connect_by_index(num)
         if _session.phase in ("awaiting", "connected") or "baglan" in _norm_text(text):
             _session.pending_action = None
-            return True, connect_by_index(num, force_pair=False)
+            force = _session.discovered_only and not _mac_is_paired(
+                _session.devices[num - 1][2] if 1 <= num <= len(_session.devices) else ""
+            )
+            return True, connect_by_index(num, force_pair=force)
 
     if _session.active and _session.phase == "awaiting":
         low = _norm_text(text)
