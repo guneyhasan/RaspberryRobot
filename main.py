@@ -565,12 +565,21 @@ def run_loop() -> None:
             bt_handled, bt_replies = bluetooth_session.handle_turn(text)
             if bt_handled:
                 _log_line("BT", f"{tid} | replies={len(bt_replies)} | phase={bluetooth_session.session().phase}")
+                skip_open_ack = bluetooth_session.consume_open_ack_skip()
                 full_bt = " ".join(bt_replies)
                 memory.append_conversation_line("Kullanıcı", text)
                 memory.append_conversation_line("Kanka", full_bt)
                 stt.record_dialogue_turn_for_stt(text, full_bt)
                 for i, line in enumerate(bt_replies):
                     if not line.strip():
+                        continue
+                    if skip_open_ack and i == 0:
+                        _log_line(
+                            "RESPONSE",
+                            f"{line} (anlık TTS, atlandı)"
+                            if len(bt_replies) == 1
+                            else f"[{i + 1}/{len(bt_replies)}] {line} (anlık TTS, atlandı)",
+                        )
                         continue
                     _log_line("RESPONSE", line if len(bt_replies) == 1 else f"[{i + 1}/{len(bt_replies)}] {line}")
                     try:

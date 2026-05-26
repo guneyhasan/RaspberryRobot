@@ -65,6 +65,7 @@ class BtSession:
 
 
 _session = BtSession()
+_open_ack_spoken = False
 
 
 def session() -> BtSession:
@@ -82,6 +83,25 @@ def is_awaiting_selection() -> bool:
 
 def is_bt_mode_active() -> bool:
     return _session.active
+
+
+def consume_open_ack_skip() -> bool:
+    """open_mode içinde anlık okunan bt_open cümlesini main döngüsünde atlama."""
+    global _open_ack_spoken
+    if _open_ack_spoken:
+        _open_ack_spoken = False
+        return True
+    return False
+
+
+def _speak_immediate(text: str) -> None:
+    s = (text or "").strip()
+    if not s:
+        return
+    try:
+        tts.speak(s, prefer_online=False)
+    except Exception as e:
+        logger.warning("BT anlık TTS başarısız: %s", e)
 
 
 def _last_device_path() -> Path:
@@ -961,14 +981,15 @@ def _try_auto_connect_paired(paired: list[tuple[str, str]]) -> list[str] | None:
 
 
 def open_mode() -> list[str]:
-    global _session
+    global _session, _open_ack_spoken
     if not is_enabled():
         return [phrases.pick("bt_error_disabled", fallback="Bluetooth modu kapalı kanka.")]
 
-    set_speaker_output()
-    ok, err = ensure_adapter_ready()
-    if not ok:
-        return [err or phrases.pick("bt_error_adapter", fallback="Bluetooth açılamadı kanka.")]
+    _open_ack_spoken = False
+    ack = phrases.pick(
+        "bt_open",
+        fallback="Tamam kanka, bluetooth açık, cihazlara bakıyorum.",
+    )
 
     _session.active = True
     _session.phase = "scanning"
@@ -976,9 +997,15 @@ def open_mode() -> list[str]:
     _session.connected_index = None
     _session.discovered_only = False
 
-    replies: list[str] = [
-        phrases.pick("bt_open", fallback="Bluetooth kulaklık modunu açtım kanka."),
-    ]
+    _speak_immediate(ack)
+    _open_ack_spoken = True
+
+    set_speaker_output()
+    ok, err = ensure_adapter_ready()
+    if not ok:
+        return [ack, err or phrases.pick("bt_error_adapter", fallback="Bluetooth açılamadı kanka.")]
+
+    replies: list[str] = [ack]
 
     paired = list_paired_devices()
     auto_extra = _try_auto_connect_paired(paired)
