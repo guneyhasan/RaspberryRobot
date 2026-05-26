@@ -21,7 +21,9 @@ def main() -> int:
         ("iki numaraya baglan", True),
         ("iki numaraya eslestir", True),
         ("yeniden tara", True),
-        ("bluetooth kapat", True),
+        ("bluetooth modundan çık", True),
+        ("kanka bluetooth modundan cik", True),
+        ("bluetooth kapat", False),
         ("kanka bluetooth kulaklık modunu kapat", False),
         ("merhaba kanka", False),
     ]

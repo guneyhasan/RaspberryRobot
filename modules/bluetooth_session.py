@@ -1169,7 +1169,7 @@ def _matches_open(text: str) -> bool:
 
 def _matches_close(text: str) -> bool:
     low = _norm_text(text)
-    return "bluetooth kapat" in low
+    return "bluetooth modundan cik" in low
 
 
 def _matches_rescan(text: str) -> bool:
