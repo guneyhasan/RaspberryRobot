@@ -661,7 +661,7 @@ def run_loop() -> None:
                 f'{tid} | text="{_safe_preview(text)}" | confidence={conf:.2f} | total={_fmt_ms(t_listen1 - t_listen0)}',
             )
 
-            # Konuşma modu: "hey kanka" ile aç, "görüşürüz kanka" ile kapat.
+            # Konuşma modu: activate/deactivate phrase listeleri (config).
             if not conversation_mode and _has_any_phrase(text, config.CONVERSATION_ACTIVATE_PHRASES):
                 conversation_mode = True
                 _log_line("MODE", f"{tid} | conversation_mode=on | trigger=activate")

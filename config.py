@@ -206,8 +206,8 @@ VAD_ADAPTIVE_ENDPOINTING = _env_bool("VAD_ADAPTIVE_ENDPOINTING", True)
 VAD_ADAPTIVE_MIN_SPEECH_SEC = float(os.getenv("VAD_ADAPTIVE_MIN_SPEECH_SEC", "0.5"))
 VAD_ADAPTIVE_SILENCE_SEC = float(os.getenv("VAD_ADAPTIVE_SILENCE_SEC", "0.35"))
 
-# Konuşma modu: sessizlik yoklaması
-CONVERSATION_NUDGE_ENABLED = _env_bool("CONVERSATION_NUDGE_ENABLED", True)
+# Konuşma modu: sessizlik yoklaması (varsayılan kapalı)
+CONVERSATION_NUDGE_ENABLED = _env_bool("CONVERSATION_NUDGE_ENABLED", False)
 CONVERSATION_NUDGE_SEC = float(os.getenv("CONVERSATION_NUDGE_SEC", "8"))
 CONVERSATION_NUDGE_COOLDOWN_SEC = float(os.getenv("CONVERSATION_NUDGE_COOLDOWN_SEC", "25"))
 
@@ -396,15 +396,21 @@ WYOMING_OPENWAKEWORD_URI = _env_str("WYOMING_OPENWAKEWORD_URI", "")
 # REQUIRE_WAKE_PHRASE=0 → "kanka" demeden de cevap verir.
 REQUIRE_WAKE_PHRASE = os.getenv("REQUIRE_WAKE_PHRASE", "1").strip().lower() not in ("0", "false", "no", "off")
 
-# Konuşma modu: "hey kanka" ile aç, "görüşürüz kanka" ile kapat.
+# Konuşma modu: "anlat kanka" / "sonra konuş kanka" ile aç; "sus kanka" ile kapat.
 CONVERSATION_ACTIVATE_PHRASES = tuple(
     p.strip().lower()
-    for p in os.getenv("CONVERSATION_ACTIVATE_PHRASES", "hey kanka").split(",")
+    for p in os.getenv(
+        "CONVERSATION_ACTIVATE_PHRASES",
+        "hey kanka,sonra konus kanka,sonra konuş kanka,anlat kanka",
+    ).split(",")
     if p.strip()
 )
 CONVERSATION_DEACTIVATE_PHRASES = tuple(
     p.strip().lower()
-    for p in os.getenv("CONVERSATION_DEACTIVATE_PHRASES", "görüşürüz kanka,gorusuruz kanka").split(",")
+    for p in os.getenv(
+        "CONVERSATION_DEACTIVATE_PHRASES",
+        "görüşürüz kanka,gorusuruz kanka,sus kanka,konusma artik kanka,konuşma artık kanka",
+    ).split(",")
     if p.strip()
 )
 
