@@ -1,6 +1,8 @@
 [Unit]
 Description=Enable PiCar-X / Robot HAT speaker amplifier (GPIO 20)
-After=multi-user.target
+# After=multi-user.target + robot-kanka Requires=speaker-enable → boot'ta robot-kanka hiç başlamaz.
+After=sound.target local-fs.target
+Before=robot-kanka.service
 
 [Service]
 Type=oneshot

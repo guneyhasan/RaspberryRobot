@@ -115,15 +115,22 @@ Kabul listesi: `scripts/acceptance_checklist.txt`
 
 **Boot'ta `inactive`, elle `start` çalışıyor**
 
-`list-dependencies` içinde `○ robot-kanka.service` ve journal'da boot'ta `Starting` yoksa: genelde `Wants=network-online.target` yüzünden. Güncel unit `network.target` kullanır; Pi'de yeniden kurun:
+`list-dependencies` içinde `○ robot-kanka.service` ve `journalctl -b -u robot-kanka` boşsa iki yaygın neden:
+
+1. **`speaker-enable` içinde `After=multi-user.target`** veya **`robot-kanka` içinde `Requires=speaker-enable`** — boot'ta `journalctl -b -u robot-kanka` boş kalır. Güncel dosyalar: `speaker-enable` → `Before=robot-kanka`; `robot-kanka` → `After=multi-user.target`, `Wants=` (Requires değil).
+
+2. **`Wants=network-online.target`** — güncel unit `network.target` kullanır.
+
+Pi'de her iki unit'i yeniden kurun:
 
 ```bash
 cd ~/RaspberryRobot
 PI_USER="$(whoami)" ROOT="$(pwd)"
+sudo cp systemd/speaker-enable.service /etc/systemd/system/
 sed -e "s|@USER@|${PI_USER}|g" -e "s|@ROOT@|${ROOT}|g" \
   systemd/robot-kanka.service | sudo tee /etc/systemd/system/robot-kanka.service
 sudo systemctl daemon-reload
-sudo systemctl enable robot-kanka
+sudo systemctl enable speaker-enable robot-kanka
 sudo reboot
 ```
 
