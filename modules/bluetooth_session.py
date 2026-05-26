@@ -261,7 +261,9 @@ def list_paired_devices() -> list[tuple[str, str]]:
     )
     all_devs = _parse_devices(out_all)
     paired: list[tuple[str, str]] = []
-    for mac, name in all_devs[: int(getattr(config, "BLUETOOTH_MAX_LIST", 8)) * 2]:
+    check_limit = int(getattr(config, "BLUETOOTH_MAX_LIST", 0))
+    check_devs = all_devs if check_limit <= 0 else all_devs[: check_limit * 2]
+    for mac, name in check_devs:
         _, info = _run_bluetoothctl_script(f"info {mac}\n", timeout=10)
         if "Paired: yes" in info:
             paired.append((mac, name))
@@ -384,9 +386,62 @@ def set_headphone_output(mac: str) -> None:
     tts.set_output_device(bluealsa_device_for_mac(mac))
 
 
+def _list_limit() -> int | None:
+    """None = sınırsız (tüm taranan cihazlar)."""
+    n = int(getattr(config, "BLUETOOTH_MAX_LIST", 0))
+    return n if n > 0 else None
+
+
+def _mac_dashed(mac: str) -> str:
+    return _normalize_mac(mac).replace(":", "-")
+
+
+def _is_friendly_name(name: str, mac: str) -> bool:
+    """Gerçek cihaz adı mı yoksa sadece MAC benzeri mi?"""
+    name = (name or "").strip()
+    if not name:
+        return False
+    mac_u = _normalize_mac(mac)
+    name_u = name.upper().replace(":", "-")
+    if name_u == _mac_dashed(mac):
+        return False
+    hex_only = re.sub(r"[^0-9A-F]", "", name_u)
+    mac_hex = mac_u.replace(":", "")
+    if hex_only == mac_hex and len(hex_only) >= 10:
+        return False
+    if re.search(r"[A-Za-zÇĞİÖŞÜçğıöşü]", name):
+        return True
+    if " " in name and len(name) > 6:
+        return True
+    if re.fullmatch(r"[0-9A-Fa-f:-]+", name) and "-" in name:
+        return False
+    return len(name) >= 5 and not re.fullmatch(r"[0-9A-Fa-f:-]+", name)
+
+
+def _sort_devices_for_display(devices: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """İsimli cihazlar önce, MAC/isimsiz olanlar sonra (numaralar buna göre)."""
+    named: list[tuple[str, str]] = []
+    unnamed: list[tuple[str, str]] = []
+    for mac, name in devices:
+        if _is_friendly_name(name, mac):
+            named.append((mac, name))
+        else:
+            unnamed.append((mac, name))
+    return named + unnamed
+
+
+def _tts_device_line(index: int, name: str, mac: str) -> str:
+    if _is_friendly_name(name, mac):
+        return f"{index}. {name}"
+    return f"{index} numara, isimsiz bluetooth cihazı"
+
+
 def _numbered_list(devices: list[tuple[str, str]]) -> list[tuple[int, str, str]]:
-    max_n = int(getattr(config, "BLUETOOTH_MAX_LIST", 8))
-    return [(i, name, mac) for i, (mac, name) in enumerate(devices[:max_n], start=1)]
+    ordered = _sort_devices_for_display(devices)
+    lim = _list_limit()
+    if lim is not None:
+        ordered = ordered[:lim]
+    return [(i, name, mac) for i, (mac, name) in enumerate(ordered, start=1)]
 
 
 def _parse_device_number(text: str) -> int | None:
@@ -475,11 +530,39 @@ def _reset_session() -> None:
 
 
 def _list_replies(intro_key: str, devices: list[tuple[int, str, str]], *, scan_hint: bool) -> list[str]:
+    total = len(devices)
     replies: list[str] = [
         phrases.pick(intro_key, fallback="Cihazlar kanka:"),
+        phrases.pick(
+            "bt_list_total",
+            fallback=f"Toplam {total} cihaz buldum kanka.",
+        ).replace("{n}", str(total)),
     ]
-    for num, name, _mac in devices:
-        replies.append(f"{num}. {name}")
+
+    named = [(n, name, mac) for n, name, mac in devices if _is_friendly_name(name, mac)]
+    unnamed = [(n, name, mac) for n, name, mac in devices if not _is_friendly_name(name, mac)]
+
+    if named:
+        replies.append(
+            phrases.pick(
+                "bt_list_named_first",
+                fallback="Önce isimli cihazlar kanka:",
+            )
+        )
+        for num, name, mac in named:
+            replies.append(_tts_device_line(num, name, mac))
+
+    if unnamed:
+        if named:
+            replies.append(
+                phrases.pick(
+                    "bt_list_unnamed_rest",
+                    fallback="İsimsiz veya MAC adresli cihazlar da var kanka:",
+                )
+            )
+        for num, name, mac in unnamed:
+            replies.append(_tts_device_line(num, name, mac))
+
     if scan_hint:
         replies.append(
             phrases.pick(

@@ -74,6 +74,8 @@ devices
 
 Güncel kod tek süreçte `scan on` → bekler → `devices` çalıştırır. Logda `BT tarama: ... merged=6` gibi bir sayı görmelisiniz.
 
+Tüm cihazlar sesli okunur (`BLUETOOTH_MAX_LIST=0`). İsimli cihazlar önce, MAC/isimsiz olanlar sonra (`5 numara, isimsiz bluetooth cihazı` gibi).
+
 ## Test (Pi)
 
 1. `aplay -D hb` — robot hoparlörü

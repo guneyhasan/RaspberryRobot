@@ -91,6 +91,18 @@
     "Yakındaki bluetooth cihazları kanka:",
     "Tarama yaptım, şunları buldum kanka:"
   ],
+  "bt_list_total": [
+    "Toplam {n} cihaz buldum kanka.",
+    "Taramada {n} cihaz çıktı kanka."
+  ],
+  "bt_list_named_first": [
+    "Önce isimli cihazlar kanka:",
+    "Adı belli olanlar şunlar kanka:"
+  ],
+  "bt_list_unnamed_rest": [
+    "İsimsiz veya sadece adres görünen cihazlar da var kanka:",
+    "Diğerleri de bunlar kanka, isimleri henüz yok:"
+  ],
   "bt_await_pair_or_connect": [
     "Numara söyle kanka. Bağlanmak için örneğin bir numaraya bağlan. İlk kez eşleştirmek için iki numaraya eşleştir.",
     "Hangi numara kanka? Bağlan veya eşleştir de."
