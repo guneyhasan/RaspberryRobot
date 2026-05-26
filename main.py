@@ -202,6 +202,7 @@ POWEROFF_VOICE_TRIGGERS = (
     "robotu tamamen kapat",
     "kanka robotu tamamen kapa",
     "robotu tamamen kapa",
+    "kanka kapan",
 )
 
 
@@ -392,8 +393,14 @@ def route_intents(text: str) -> str | None:
 
     # ── Vision: bak / ne var / ne görüyorsun ────────────────────────────────
     vision_triggers = (
+        "gördüğünü yorumla",
+        "gordugunu yorumla",
+        "gördüğünü anlat",
+        "gordugunu anlat",
         "ne görüyorsun",
         "ne goruyorsun",
+        "burada ne görüyorsun",
+        "burada ne goruyorsun",
         "burada ne var",
         "orada ne var",
         "önümde ne var",
@@ -417,6 +424,17 @@ def route_intents(text: str) -> str | None:
         try:
             if camera.camera_frozen():
                 logger.warning("Kamera kilit şüphesi — yeniden denenecek.")
+            # Vision çağrısı gecikebilir; hemen kısa bir sesli geri bildirim ver.
+            try:
+                tts.speak(
+                    phrases.pick(
+                        "vision_ack",
+                        fallback="Tamam kanka, fotoğrafı yorumluyorum.",
+                    ),
+                    prefer_online=False,
+                )
+            except Exception as e:
+                logger.warning("Vision ack TTS atlandı: %s", e)
             return camera.look_and_describe()
         except Exception:
             logger.exception("Vision/kamera hatası")
@@ -568,7 +586,7 @@ def run_loop() -> None:
     cam_th.start()
 
     seq = 0
-    conversation_mode = False
+    conversation_mode = True
     last_nudge_at = 0.0
     pending_user_text: str | None = None
     while True:

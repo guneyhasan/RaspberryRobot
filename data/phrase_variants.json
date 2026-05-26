@@ -15,6 +15,13 @@
     "Hallederim.",
     "Tamamdır."
   ],
+  "vision_ack": [
+    "Tamam kanka, fotoğrafı yorumluyorum.",
+    "Tamamdır kanka, bir bakıyorum hemen.",
+    "Dur kanka, fotoğrafa bakıyorum şimdi.",
+    "Tamam kanka, ne olduğuna bakıyorum.",
+    "Tamamdır, bir saniye kanka, yorumluyorum."
+  ],
   "nudge": [
     "Kanka orada mısın?",
     "Bir şey mi düşünüyorsun?",
