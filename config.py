@@ -261,6 +261,8 @@ BLUETOOTH_MAX_LIST = int(os.getenv("BLUETOOTH_MAX_LIST", "0"))
 BLUETOOTH_AUTO_CONNECT_PAIRED = _env_bool("BLUETOOTH_AUTO_CONNECT_PAIRED", True)
 BLUETOOTH_PAIR_TIMEOUT_SEC = float(os.getenv("BLUETOOTH_PAIR_TIMEOUT_SEC", "60"))
 BLUETOOTH_PAIR_SCAN_SEC = float(os.getenv("BLUETOOTH_PAIR_SCAN_SEC", "5"))
+# pair öncesi hedef MAC taramada görünene kadar bekleme (saniye)
+BLUETOOTH_PAIR_TARGET_WAIT_SEC = float(os.getenv("BLUETOOTH_PAIR_TARGET_WAIT_SEC", "20"))
 # Boş bırakılırsa AUDIO_OUTPUT_ALSA_DEVICE kullanılır (ör. plughw:0,0)
 BLUETOOTH_SPEAKER_ALSA_DEVICE = _env_str("BLUETOOTH_SPEAKER_ALSA_DEVICE", "")
 

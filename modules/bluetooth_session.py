@@ -70,6 +70,7 @@ class BtSession:
 
 _session = BtSession()
 _open_ack_spoken = False
+_bt_io_lock = threading.RLock()
 
 
 def session() -> BtSession:
@@ -152,22 +153,48 @@ def _norm_text(text: str) -> str:
 
 
 def _run_bluetoothctl_script(commands: str, timeout: float = 30.0) -> tuple[int, str]:
-    script = "\n".join(line.strip() for line in commands.strip().splitlines() if line.strip())
-    script += "\nquit\n"
-    try:
-        r = subprocess.run(
-            ["bluetoothctl"],
-            input=script,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        out = (r.stdout or "") + (r.stderr or "")
-        return r.returncode, out
-    except FileNotFoundError:
-        return 127, ""
-    except subprocess.TimeoutExpired:
-        return 124, ""
+    with _bt_io_lock:
+        script = "\n".join(line.strip() for line in commands.strip().splitlines() if line.strip())
+        script += "\nquit\n"
+        try:
+            r = subprocess.run(
+                ["bluetoothctl"],
+                input=script,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            out = (r.stdout or "") + (r.stderr or "")
+            return r.returncode, out
+        except FileNotFoundError:
+            return 127, ""
+        except subprocess.TimeoutExpired:
+            return 124, ""
+
+
+def _line_mentions_mac(line: str, mac: str) -> bool:
+    mac_u = _normalize_mac(mac)
+    compact = mac_u.replace(":", "").upper()
+    u = line.upper().replace("-", "").replace(":", "")
+    return compact in u or mac_u in line.upper()
+
+
+def _read_bt_stdout_line(
+    proc: subprocess.Popen[str],
+    lines: list[str],
+    *,
+    idle_timeout: float = 0.4,
+) -> str:
+    if proc.stdout is None:
+        return ""
+    line = proc.stdout.readline()
+    if line:
+        lines.append(line)
+        return line
+    if proc.poll() is not None:
+        return ""
+    time.sleep(idle_timeout)
+    return ""
 
 
 def _parse_devices(output: str) -> list[tuple[str, str]]:
@@ -378,35 +405,36 @@ def _bluetoothctl_live_scan(wait_sec: float) -> str:
     Tek bluetoothctl sürecinde scan on → bekle → devices.
     Ayrı süreçlerde scan on + quit taramayı hemen durdurur (BlueZ 5.66+).
     """
-    wait_sec = max(4.0, wait_sec)
-    proc: subprocess.Popen[str] | None = None
-    try:
-        proc = subprocess.Popen(
-            ["bluetoothctl"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        if proc.stdin is None or proc.stdout is None:
-            return ""
-        for chunk in (_BT_AGENT_SCRIPT, "power on\n", "scan on\n"):
-            proc.stdin.write(chunk)
+    with _bt_io_lock:
+        wait_sec = max(4.0, wait_sec)
+        proc: subprocess.Popen[str] | None = None
+        try:
+            proc = subprocess.Popen(
+                ["bluetoothctl"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            if proc.stdin is None or proc.stdout is None:
+                return ""
+            for chunk in (_BT_AGENT_SCRIPT, "power on\n", "scan on\n"):
+                proc.stdin.write(chunk)
+                proc.stdin.flush()
+            time.sleep(wait_sec)
+            proc.stdin.write("devices\nscan off\nquit\n")
             proc.stdin.flush()
-        time.sleep(wait_sec)
-        proc.stdin.write("devices\nscan off\nquit\n")
-        proc.stdin.flush()
-        out, _ = proc.communicate(timeout=wait_sec + 25)
-        logger.debug("BT live scan çıktı uzunluğu: %s", len(out or ""))
-        return out or ""
-    except subprocess.TimeoutExpired:
-        logger.warning("BT live scan zaman aşımı")
-        if proc is not None:
-            proc.kill()
-        return ""
-    except OSError as e:
-        logger.warning("BT live scan hatası: %s", e)
-        return ""
+            out, _ = proc.communicate(timeout=wait_sec + 25)
+            logger.debug("BT live scan çıktı uzunluğu: %s", len(out or ""))
+            return out or ""
+        except subprocess.TimeoutExpired:
+            logger.warning("BT live scan zaman aşımı")
+            if proc is not None:
+                proc.kill()
+            return ""
+        except OSError as e:
+            logger.warning("BT live scan hatası: %s", e)
+            return ""
 
 
 def list_paired_devices() -> list[tuple[str, str]]:
@@ -540,18 +568,41 @@ def _mac_is_paired(mac: str) -> bool:
 
 def _bluetoothctl_live_pair(mac: str, timeout_sec: float | None = None) -> tuple[bool, str]:
     """
-    Tek bluetoothctl oturumunda pair → trust (terminaldeki gibi).
-    Kısa script + quit, eşleştirme bitmeden agent kapanınca başarısız oluyordu.
+    Tek bluetoothctl oturumunda: agent → tara (MAC görünene kadar) → pair → trust.
+    Paralel oturumlar agent çakışmasına yol açar; _bt_io_lock ile seri çalışır.
     """
+    with _bt_io_lock:
+        return _bluetoothctl_live_pair_locked(mac, timeout_sec)
+
+
+def _bluetoothctl_live_pair_locked(mac: str, timeout_sec: float | None = None) -> tuple[bool, str]:
     timeout_sec = timeout_sec if timeout_sec is not None else float(
         getattr(config, "BLUETOOTH_PAIR_TIMEOUT_SEC", 60)
     )
-    scan_sec = float(getattr(config, "BLUETOOTH_PAIR_SCAN_SEC", 5))
+    target_wait = float(getattr(config, "BLUETOOTH_PAIR_TARGET_WAIT_SEC", 20))
     mac = _normalize_mac(mac)
     proc: subprocess.Popen[str] | None = None
     lines: list[str] = []
 
+    def send(cmd: str) -> None:
+        assert proc is not None and proc.stdin is not None
+        proc.stdin.write(cmd)
+        proc.stdin.flush()
+
+    def read_until(deadline: float, stop_if: Callable[[str, str], bool] | None = None) -> bool:
+        while time.time() < deadline:
+            line = _read_bt_stdout_line(proc, lines)
+            if not line:
+                if proc and proc.poll() is not None:
+                    break
+                continue
+            logger.info("BT pair: %s", line.strip())
+            if stop_if and stop_if(line, "".join(lines)):
+                return True
+        return False
+
     try:
+        tts.stop_speaking()
         proc = subprocess.Popen(
             ["bluetoothctl"],
             stdin=subprocess.PIPE,
@@ -563,63 +614,93 @@ def _bluetoothctl_live_pair(mac: str, timeout_sec: float | None = None) -> tuple
         if proc.stdin is None or proc.stdout is None:
             return False, ""
 
-        def send(cmd: str, pause: float = 0.0) -> None:
-            proc.stdin.write(cmd)
-            proc.stdin.flush()
-            if pause > 0:
-                time.sleep(pause)
+        send(_BT_AGENT_SCRIPT)
+        agent_deadline = time.time() + 6.0
+        agent_ok = read_until(
+            agent_deadline,
+            lambda ln, _all: "Agent registered" in ln or "Already registered" in ln,
+        )
+        if not agent_ok:
+            logger.warning("BT agent kaydı doğrulanamadı, yine de devam")
 
-        send(_BT_AGENT_SCRIPT, 0.4)
-        send("power on\n", 1.0)
-        if scan_sec > 0:
-            send("scan on\n", scan_sec)
-            send("scan off\n", 0.6)
-        send(f"pair {mac}\n", 0.0)
+        send("power on\n")
+        time.sleep(0.8)
+        send(f"info {mac}\n")
+        read_until(time.time() + 3.0)
+        if _output_indicates_paired(mac, "".join(lines)):
+            send(f"trust {mac}\n")
+            time.sleep(0.5)
+            send("quit\n")
+            proc.communicate(timeout=5)
+            return True, "".join(lines)
 
-        deadline = time.time() + timeout_sec
-        pair_done = False
-        while time.time() < deadline:
-            line = proc.stdout.readline()
-            if not line:
-                if proc.poll() is not None:
+        send("scan on\n")
+        seen_target = read_until(
+            time.time() + target_wait,
+            lambda ln, _all: _line_mentions_mac(ln, mac),
+        )
+        if not seen_target:
+            send("devices\n")
+            read_until(time.time() + 2.0)
+            seen_target = any(_line_mentions_mac(ln, mac) for ln in lines)
+        if not seen_target:
+            logger.warning("BT pair: %s taramada görünmedi (%ss)", mac, target_wait)
+            send("scan off\nquit\n")
+            proc.communicate(timeout=5)
+            return False, "".join(lines)
+
+        logger.info("BT pair: %s taramada görüldü, eşleştiriliyor", mac)
+
+        def try_pair_once() -> bool:
+            send(f"pair {mac}\n")
+            pair_deadline = time.time() + timeout_sec
+            not_available = False
+            while time.time() < pair_deadline:
+                line = _read_bt_stdout_line(proc, lines)
+                if not line:
+                    if proc.poll() is not None:
+                        break
+                    continue
+                logger.info("BT pair: %s", line.strip())
+                joined = "".join(lines)
+                if _output_indicates_paired(mac, joined):
+                    return True
+                low = line.lower()
+                if "not available" in low:
+                    not_available = True
                     break
-                time.sleep(0.15)
-                continue
-            lines.append(line)
-            logger.info("BT pair: %s", line.strip())
-            joined = "".join(lines)
-            if _output_indicates_paired(mac, joined):
-                pair_done = True
-                break
-            if re.search(r"(Authentication Failed|org\.bluez\.Error)", line, re.I):
-                break
-            if re.search(r"Failed to pair|Pairing failed", line, re.I):
-                break
-
-        send(f"trust {mac}\n", 0.8)
-        send(f"info {mac}\n", 1.2)
-        drain_until = time.time() + 4.0
-        while time.time() < drain_until:
-            line = proc.stdout.readline()
-            if not line:
-                if proc.poll() is not None:
+                if re.search(r"(Authentication Failed|org\.bluez\.Error|Failed to pair)", line, re.I):
                     break
-                time.sleep(0.1)
-                continue
-            lines.append(line)
+            return False if not_available else _output_indicates_paired(mac, "".join(lines))
 
-        send("quit\n", 0.1)
+        if not try_pair_once():
+            logger.info("BT pair: yeniden tarama + ikinci deneme %s", mac)
+            send("scan on\n")
+            read_until(time.time() + min(12.0, target_wait), lambda ln, _a: _line_mentions_mac(ln, mac))
+            if not try_pair_once():
+                send("scan off\nquit\n")
+                proc.communicate(timeout=5)
+                out = "".join(lines)
+                logger.warning("BT pair başarısız %s | %s", mac, out[-600:])
+                return False, out
+
+        send("scan off\n")
+        time.sleep(0.3)
+        send(f"trust {mac}\n")
+        time.sleep(0.6)
+        send(f"info {mac}\n")
+        read_until(time.time() + 3.0)
+        send("quit\n")
         try:
             proc.communicate(timeout=8)
         except subprocess.TimeoutExpired:
             proc.kill()
 
         out = "".join(lines)
-        if pair_done or _output_indicates_paired(mac, out) or _mac_is_paired(mac):
+        if _output_indicates_paired(mac, out) or _mac_is_paired(mac):
             logger.info("BT pair başarılı: %s", mac)
             return True, out
-
-        logger.warning("BT pair başarısız %s | son çıktı: %s", mac, out[-600:])
+        logger.warning("BT pair başarısız %s | %s", mac, out[-600:])
         return False, out
     except Exception as e:
         logger.warning("BT live pair hata: %s", e)
@@ -628,7 +709,7 @@ def _bluetoothctl_live_pair(mac: str, timeout_sec: float | None = None) -> tuple
                 proc.kill()
             except OSError:
                 pass
-        return False, ""
+        return False, "".join(lines)
 
 
 def pair_mac(mac: str) -> tuple[bool, str]:
@@ -650,8 +731,8 @@ trust {mac}
     if _mac_is_paired(mac):
         return True, ""
     return False, (
-        "Eşleştirme tamamlanamadı kanka. Kulaklığı eşleştirme modunda tut, "
-        "telefonda eski eşleşmeyi sil, sonra yeniden dene."
+        "Kulaklığı eşleştirme modunda tut kanka; listede görünse bile yakında olmalı. "
+        "Telefonda eski eşleşmeyi silip yeniden dene."
     )
 
 
