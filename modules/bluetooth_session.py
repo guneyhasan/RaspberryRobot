@@ -71,6 +71,7 @@ class BtSession:
 _session = BtSession()
 _open_ack_spoken = False
 _bt_io_lock = threading.RLock()
+_bt_agent_proc: subprocess.Popen[str] | None = None
 
 
 def session() -> BtSession:
@@ -154,7 +155,17 @@ def _norm_text(text: str) -> str:
 
 def _run_bluetoothctl_script(commands: str, timeout: float = 30.0) -> tuple[int, str]:
     with _bt_io_lock:
+        _ensure_bt_agent_daemon()
         script = "\n".join(line.strip() for line in commands.strip().splitlines() if line.strip())
+        # Agent daemon aktifken tekrar agent satırı gönderme
+        if getattr(config, "BLUETOOTH_AGENT_DAEMON", True) and "agent " in script.lower():
+            script = "\n".join(
+                ln
+                for ln in script.splitlines()
+                if ln.strip()
+                and not ln.strip().lower().startswith("agent ")
+                and ln.strip().lower() != "default-agent"
+            )
         script += "\nquit\n"
         try:
             r = subprocess.run(
@@ -568,17 +579,43 @@ def _output_indicates_connected(mac: str, output: str) -> bool:
     return False
 
 
-def _kill_stale_bluetoothctl() -> None:
-    """Eski bluetoothctl süreçleri agent'ı meşgul edebilir."""
-    if not getattr(config, "BLUETOOTH_KILL_STALE_CTL", True):
+def _ensure_bt_agent_daemon() -> None:
+    """Pairing agent'ı tek süreçte tut (her pair'de yeniden kayıt hatası olmasın)."""
+    global _bt_agent_proc
+    if not getattr(config, "BLUETOOTH_AGENT_DAEMON", True):
+        return
+    if _bt_agent_proc is not None and _bt_agent_proc.poll() is None:
         return
     try:
-        subprocess.run(
-            ["pkill", "-f", "bluetoothctl"],
-            capture_output=True,
-            timeout=3,
+        _bt_agent_proc = subprocess.Popen(
+            ["bluetoothctl"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
         )
+        if _bt_agent_proc.stdin:
+            _bt_agent_proc.stdin.write(
+                "agent NoInputNoOutput\ndefault-agent\npower on\npairable on\n"
+            )
+            _bt_agent_proc.stdin.flush()
+        time.sleep(1.0)
+        logger.info("BT agent arka plan süreci başlatıldı (pid=%s)", _bt_agent_proc.pid)
+    except OSError as e:
+        logger.warning("BT agent daemon başlatılamadı: %s", e)
+        _bt_agent_proc = None
+
+
+def _kill_stale_bluetoothctl() -> None:
+    """Eski bluetoothctl süreçleri agent'ı meşgul edebilir (daemon hariç)."""
+    if not getattr(config, "BLUETOOTH_KILL_STALE_CTL", False):
+        return
+    agent_pid = _bt_agent_proc.pid if _bt_agent_proc and _bt_agent_proc.poll() is None else None
+    try:
+        subprocess.run(["pkill", "-f", "bluetoothctl"], capture_output=True, timeout=3)
         time.sleep(0.35)
+        if agent_pid:
+            _ensure_bt_agent_daemon()
     except (OSError, subprocess.TimeoutExpired):
         pass
 
@@ -600,7 +637,7 @@ def _bluetoothctl_live_pair_locked(mac: str, timeout_sec: float | None = None) -
     timeout_sec = timeout_sec if timeout_sec is not None else float(
         getattr(config, "BLUETOOTH_PAIR_TIMEOUT_SEC", 60)
     )
-    target_wait = float(getattr(config, "BLUETOOTH_PAIR_TARGET_WAIT_SEC", 20))
+    target_wait = float(getattr(config, "BLUETOOTH_PAIR_TARGET_WAIT_SEC", 30))
     mac = _normalize_mac(mac)
     proc: subprocess.Popen[str] | None = None
     lines: list[str] = []
@@ -610,7 +647,8 @@ def _bluetoothctl_live_pair_locked(mac: str, timeout_sec: float | None = None) -
         proc.stdin.write(cmd)
         proc.stdin.flush()
 
-    def read_until(deadline: float, stop_if: Callable[[str, str], bool] | None = None) -> bool:
+    def _wait_bt_cmd(wait_sec: float) -> bool:
+        deadline = time.time() + wait_sec
         while time.time() < deadline:
             line = _read_bt_stdout_line(proc, lines)
             if not line:
@@ -618,12 +656,28 @@ def _bluetoothctl_live_pair_locked(mac: str, timeout_sec: float | None = None) -
                     break
                 continue
             logger.info("BT pair: %s", line.strip())
-            if stop_if and stop_if(line, "".join(lines)):
+            all_out = "".join(lines)
+            if _output_indicates_paired(mac, all_out) or _output_indicates_connected(
+                mac, all_out
+            ):
                 return True
-        return False
+            low = line.lower()
+            if "not available" in low:
+                return False
+            if re.search(
+                r"(Authentication Failed|org\.bluez\.Error|Failed to pair|Failed to connect)",
+                line,
+                re.I,
+            ):
+                return False
+        all_out = "".join(lines)
+        return _output_indicates_paired(mac, all_out) or _output_indicates_connected(
+            mac, all_out
+        )
 
     try:
         tts.stop_speaking()
+        _ensure_bt_agent_daemon()
         _kill_stale_bluetoothctl()
         proc = subprocess.Popen(
             ["bluetoothctl"],
@@ -636,97 +690,69 @@ def _bluetoothctl_live_pair_locked(mac: str, timeout_sec: float | None = None) -
         if proc.stdin is None or proc.stdout is None:
             return False, ""
 
-        send("agent NoInputNoOutput\n")
-        read_until(time.time() + 4.0)
-        send("default-agent\n")
-        read_until(
-            time.time() + 6.0,
-            lambda ln, _all: "Agent registered" in ln or "Already registered" in ln,
-        )
-
+        # Agent arka planda; bu oturumda sadece tara/bağlan.
         send("power on\n")
-        time.sleep(0.6)
-        send("pairable on\n")
-        time.sleep(0.3)
-        send("discoverable on\n")
-        time.sleep(0.3)
+        time.sleep(0.4)
 
-        # Önce tara; info/pair "not available" verir cihaz önbellekte yokken.
         send("scan on\n")
-        seen_target = read_until(
-            time.time() + target_wait,
-            lambda ln, _all: _line_mentions_mac(ln, mac)
-            and ("[NEW] Device" in ln or "Device " in ln or "[CHG] Device" in ln),
-        )
-        if not seen_target:
+        scan_deadline = time.time() + target_wait
+        saw_new = False
+        linked = False
+
+        while time.time() < scan_deadline and not linked:
+            line = _read_bt_stdout_line(proc, lines)
+            if not line:
+                if proc.poll() is not None:
+                    break
+                continue
+            logger.info("BT pair: %s", line.strip())
+
+            if _line_mentions_mac(line, mac) and "[DEL] Device" in line:
+                logger.warning(
+                    "BT pair: %s kayboldu (DEL) — kulaklığı eşleştirme modunda ve yakın tut",
+                    mac,
+                )
+
+            if _line_mentions_mac(line, mac) and "[NEW] Device" in line:
+                saw_new = True
+                logger.info("BT pair: [NEW] %s — anında connect (tarama açık)", mac)
+                send(f"connect {mac}\n")
+                if _wait_bt_cmd(min(22.0, timeout_sec)):
+                    linked = True
+                    break
+                send(f"pair {mac}\n")
+                if _wait_bt_cmd(timeout_sec):
+                    linked = True
+                    break
+
+        if not linked:
             send("devices\n")
-            read_until(time.time() + 2.5)
-            seen_target = any(
-                _line_mentions_mac(ln, mac) and "Device" in ln for ln in lines
-            )
-        if not seen_target:
-            logger.warning("BT pair: %s taramada görünmedi (%ss)", mac, target_wait)
+            drain = time.time() + 2.0
+            while time.time() < drain:
+                line = _read_bt_stdout_line(proc, lines)
+                if not line and proc.poll() is not None:
+                    break
+            has_entry = any(_line_mentions_mac(ln, mac) and "Device" in ln for ln in lines)
+            if has_entry:
+                logger.info("BT pair: %s devices listesinde, connect deneniyor", mac)
+                send(f"connect {mac}\n")
+                linked = _wait_bt_cmd(min(22.0, timeout_sec))
+                if not linked:
+                    send(f"pair {mac}\n")
+                    linked = _wait_bt_cmd(timeout_sec)
+
+        if not linked and not saw_new:
+            logger.warning("BT pair: %s taramada bulunamadı (%ss)", mac, target_wait)
             send("scan off\nquit\n")
             proc.communicate(timeout=5)
             return False, "".join(lines)
 
-        joined = "".join(lines)
-        if _output_indicates_paired(mac, joined):
-            send(f"trust {mac}\n")
-            time.sleep(0.4)
-            send(f"connect {mac}\n")
-            read_until(time.time() + 15.0)
+        if not linked:
             send("scan off\nquit\n")
             proc.communicate(timeout=5)
-            return True, "".join(lines)
-
-        logger.info("BT pair: %s görüldü → connect, gerekirse pair", mac)
-
-        def _wait_bt_cmd(cmd_name: str, wait_sec: float) -> bool:
-            deadline = time.time() + wait_sec
-            while time.time() < deadline:
-                line = _read_bt_stdout_line(proc, lines)
-                if not line:
-                    if proc.poll() is not None:
-                        break
-                    continue
-                logger.info("BT pair: %s", line.strip())
-                all_out = "".join(lines)
-                if _output_indicates_paired(mac, all_out) or _output_indicates_connected(
-                    mac, all_out
-                ):
-                    return True
-                low = line.lower()
-                if "not available" in low:
-                    return False
-                if re.search(
-                    r"(Authentication Failed|org\.bluez\.Error|Failed to pair|Failed to connect)",
-                    line,
-                    re.I,
-                ):
-                    return False
-            all_out = "".join(lines)
-            return _output_indicates_paired(mac, all_out) or _output_indicates_connected(
-                mac, all_out
-            )
-
-        send(f"connect {mac}\n")
-        if not _wait_bt_cmd("connect", min(25.0, timeout_sec)):
-            logger.info("BT pair: connect olmadı, pair deneniyor %s", mac)
-            send(f"pair {mac}\n")
-            if not _wait_bt_cmd("pair", timeout_sec):
-                send("scan on\n")
-                read_until(
-                    time.time() + min(15.0, target_wait),
-                    lambda ln, _a: _line_mentions_mac(ln, mac),
-                )
-                send(f"pair {mac}\n")
-                if not _wait_bt_cmd("pair", timeout_sec):
-                    send("scan off\nquit\n")
-                    proc.communicate(timeout=5)
-                    out = "".join(lines)
-                    logger.warning("BT pair başarısız %s | %s", mac, out[-600:])
-                    return False, out
+            out = "".join(lines)
+            logger.warning("BT pair bağlantı başarısız %s | %s", mac, out[-600:])
+            return False, out
 
         send("scan off\n")
         time.sleep(0.3)
