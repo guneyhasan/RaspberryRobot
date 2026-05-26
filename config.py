@@ -254,6 +254,14 @@ BLUETOOTH_BT_CONNECT_WAIT_SEC = float(os.getenv("BLUETOOTH_BT_CONNECT_WAIT_SEC",
 BLUETOOTH_ACTIVE_SCAN_SEC = float(os.getenv("BLUETOOTH_ACTIVE_SCAN_SEC", "4"))
 BLUETOOTH_LIST_BARGE_IN = _env_bool("BLUETOOTH_LIST_BARGE_IN", True)
 BLUETOOTH_BARGE_IN_LISTEN_SEC = float(os.getenv("BLUETOOTH_BARGE_IN_LISTEN_SEC", "2.0"))
+
+# Genel konuşma barge-in (robot konuşurken kullanıcı araya girer)
+BARGE_IN_ENABLED = _env_bool("BARGE_IN_ENABLED", True)
+BARGE_IN_LISTEN_SEC = float(os.getenv("BARGE_IN_LISTEN_SEC", "2.0"))
+BARGE_IN_MIN_CHARS = int(os.getenv("BARGE_IN_MIN_CHARS", "4"))
+BARGE_IN_ONLY_CONVERSATION_MODE = _env_bool("BARGE_IN_ONLY_CONVERSATION_MODE", True)
+_barge_vad = os.getenv("BARGE_IN_VAD_THRESHOLD", "").strip()
+BARGE_IN_VAD_THRESHOLD: float | None = float(_barge_vad) if _barge_vad else None
 BLUETOOTH_A2DP_PROFILE = _env_str("BLUETOOTH_A2DP_PROFILE", "a2dp")
 BLUETOOTH_LIST_PAIRED_ONLY = _env_bool("BLUETOOTH_LIST_PAIRED_ONLY", False)
 # 0 = taramada bulunan tüm cihazları sesli listele; >0 üst sınır

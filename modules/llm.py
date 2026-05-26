@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from collections.abc import Callable
 from typing import Any, Optional
@@ -156,7 +157,12 @@ def _emit_sentences_from_text(text: str, on_sentence: Callable[[str], None]) -> 
     buf.flush()
 
 
-def _stream_openai(messages: list[dict[str, Any]], on_token: Callable[[str], None]) -> str:
+def _stream_openai(
+    messages: list[dict[str, Any]],
+    on_token: Callable[[str], None],
+    *,
+    cancel: threading.Event | None = None,
+) -> str:
     client = _get_client()
     stream = client.chat.completions.create(
         model=config.MODEL,
@@ -166,6 +172,8 @@ def _stream_openai(messages: list[dict[str, Any]], on_token: Callable[[str], Non
     )
     parts: list[str] = []
     for chunk in stream:
+        if cancel is not None and cancel.is_set():
+            break
         delta = chunk.choices[0].delta.content or ""
         if delta:
             parts.append(delta)
@@ -173,7 +181,12 @@ def _stream_openai(messages: list[dict[str, Any]], on_token: Callable[[str], Non
     return "".join(parts).strip()
 
 
-def _stream_groq(messages: list[dict[str, Any]], on_token: Callable[[str], None]) -> str:
+def _stream_groq(
+    messages: list[dict[str, Any]],
+    on_token: Callable[[str], None],
+    *,
+    cancel: threading.Event | None = None,
+) -> str:
     client = _get_groq_client()
     completion = client.chat.completions.create(
         model=config.GROQ_MODEL,
@@ -186,6 +199,8 @@ def _stream_groq(messages: list[dict[str, Any]], on_token: Callable[[str], None]
     )
     parts: list[str] = []
     for chunk in completion:
+        if cancel is not None and cancel.is_set():
+            break
         delta = chunk.choices[0].delta.content or ""
         if delta:
             parts.append(delta)
@@ -221,14 +236,23 @@ def _ask_non_stream(messages: list[dict[str, Any]], provider: str) -> str:
 def ask_stream_sentences(
     messages: list[dict[str, Any]],
     on_sentence: Callable[[str], None],
+    *,
+    cancel: threading.Event | None = None,
 ) -> str:
     """
     LLM yanıtını cümle cümle iletir; tam metni döndürür.
+  cancel set ise stream ve TTS callback erken durur.
     """
     ensure_daily_quota()
     provider = _select_provider()
     min_c = int(getattr(config, "LLM_STREAM_MIN_SENTENCE_CHARS", 12))
-    sent_buf = _SentenceBuffer(min_c, on_sentence)
+
+    def _on_sentence_wrapped(s: str) -> None:
+        if cancel is not None and cancel.is_set():
+            return
+        on_sentence(s)
+
+    sent_buf = _SentenceBuffer(min_c, _on_sentence_wrapped)
     use_stream = _stream_enabled_for(provider)
 
     last_err: Optional[Exception] = None
@@ -238,18 +262,25 @@ def ask_stream_sentences(
             if use_stream:
 
                 def on_token(delta: str) -> None:
+                    if cancel is not None and cancel.is_set():
+                        return
                     sent_buf.push(delta)
 
                 if provider == "openai":
-                    text = _stream_openai(messages, on_token)
+                    text = _stream_openai(messages, on_token, cancel=cancel)
                 else:
-                    text = _stream_groq(messages, on_token)
-                _bump_daily()
+                    text = _stream_groq(messages, on_token, cancel=cancel)
+                if cancel is None or not cancel.is_set():
+                    _bump_daily()
                 sent_buf.flush()
                 return text
 
+            if cancel is not None and cancel.is_set():
+                return ""
             text = _ask_non_stream(messages, provider)
-            _emit_sentences_from_text(text, on_sentence)
+            if cancel is not None and cancel.is_set():
+                return text
+            _emit_sentences_from_text(text, _on_sentence_wrapped)
             return text
 
         except (APITimeoutError, RateLimitError, APIError, Exception) as e:

@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import config  # noqa: E402
-from modules import battery, bluetooth_session, camera, head, llm, memory, motion, phrases, stt, tts, vad, wake_word  # noqa: E402
+from modules import battery, barge_in, bluetooth_session, camera, head, llm, memory, motion, phrases, stt, tts, vad, wake_word  # noqa: E402
 from modules import health  # noqa: E402
 
 logger = logging.getLogger("robot_kanka")
@@ -85,27 +85,88 @@ def _speak_reply(
     return kind, duration
 
 
-def _llm_reply_and_speak(text: str, tid: str) -> str:
+def _speak_reply_with_barge_in(
+    reply: str,
+    *,
+    conversation_mode: bool,
+    prefer_online: bool = True,
+    force_piper: bool = False,
+    tid: str = "",
+) -> tuple[str | None, str, float]:
+    """Dönüş: (kesinti_metni veya None, tts_kind, süre_s)."""
+
+    def _do(txt: str) -> tuple[str, float]:
+        return _speak_reply(
+            txt,
+            prefer_online=prefer_online,
+            force_piper=force_piper,
+            tid=tid,
+        )
+
+    if barge_in.should_use_barge_in(conversation_mode=conversation_mode):
+        interrupted = barge_in.speak_with_barge_in(
+            _do,
+            reply,
+            require_wake=False,
+            speaking_context=reply,
+        )
+        if interrupted:
+            return interrupted, "barge-in", 0.0
+    kind, duration = _speak_reply(
+        reply,
+        prefer_online=prefer_online,
+        force_piper=force_piper,
+        tid=tid,
+    )
+    return None, kind, duration
+
+
+def _llm_reply_and_speak(
+    text: str,
+    tid: str,
+    *,
+    conversation_mode: bool,
+) -> tuple[str, str | None]:
+    import threading
+
     messages = _build_llm_messages(text)
     parts: list[str] = []
+    cancel = threading.Event()
+    listener: barge_in.BargeInListener | None = None
+    if barge_in.should_use_barge_in(conversation_mode=conversation_mode):
+        listener = barge_in.BargeInListener(cancel, require_wake=False)
+        listener.start()
 
     def on_sentence(s: str) -> None:
+        if cancel.is_set():
+            return
         parts.append(s)
         try:
             tts.speak(s, prefer_online=True)
         except Exception as e:
+            if cancel.is_set():
+                return
             logger.warning("TTS cümle hatası, Piper: %s", e)
             tts.speak(s, prefer_online=False)
 
     t_llm0 = time.perf_counter()
-    full = llm.ask_stream_sentences(messages, on_sentence=on_sentence)
+    try:
+        full = llm.ask_stream_sentences(messages, on_sentence=on_sentence, cancel=cancel)
+    finally:
+        if listener is not None:
+            listener.stop()
+
+    interrupted = listener.interrupted_text if listener else None
     t_llm1 = time.perf_counter()
     reply = (full or " ".join(parts)).strip()
     _log_line(
         "LLM_OK",
-        f'{tid} | provider={llm.selected_provider()} | stream=1 | elapsed={_fmt_ms(t_llm1 - t_llm0)} | reply_preview="{_safe_preview(reply)}"',
+        f'{tid} | provider={llm.selected_provider()} | stream=1 | elapsed={_fmt_ms(t_llm1 - t_llm0)} | '
+        f'interrupted={bool(interrupted)} | reply_preview="{_safe_preview(reply)}"',
     )
-    return reply or phrases.pick("llm_fallback")
+    if interrupted:
+        return reply, interrupted
+    return reply or phrases.pick("llm_fallback"), None
 
 
 def _has_any_phrase(text: str, phrases_tuple: tuple[str, ...]) -> bool:
@@ -338,6 +399,13 @@ def run_loop() -> None:
         ", ".join(config.CONVERSATION_DEACTIVATE_PHRASES) if config.CONVERSATION_DEACTIVATE_PHRASES else "(boş)",
     )
     logger.info(
+        "Barge-in: enabled=%s | listen_sec=%s | only_conversation_mode=%s | vad_thr=%s",
+        getattr(config, "BARGE_IN_ENABLED", True),
+        getattr(config, "BARGE_IN_LISTEN_SEC", 2.0),
+        getattr(config, "BARGE_IN_ONLY_CONVERSATION_MODE", True),
+        getattr(config, "BARGE_IN_VAD_THRESHOLD", None) or "(varsayılan VAD)",
+    )
+    logger.info(
         "STT: backend=%s | server_spawn=%s | base_url=%s",
         getattr(config, "WHISPER_STT_BACKEND", "cli"),
         getattr(config, "WHISPER_SERVER_SPAWN", True),
@@ -448,11 +516,8 @@ def run_loop() -> None:
     seq = 0
     conversation_mode = False
     last_nudge_at = 0.0
+    pending_user_text: str | None = None
     while True:
-        if tts.is_speaking():
-            time.sleep(0.05)
-            continue
-
         seq += 1
         tid = _trace_id(seq)
         _log_line(
@@ -462,7 +527,11 @@ def run_loop() -> None:
         try:
             t_listen0 = time.perf_counter()
             try:
-                if (
+                if pending_user_text:
+                    text, conf = pending_user_text, 1.0
+                    pending_user_text = None
+                    _log_line("BARGE_IN", f"{tid} | kesinti sonrası tur | text=\"{_safe_preview(text)}\"")
+                elif (
                     conversation_mode
                     and getattr(config, "CONVERSATION_NUDGE_ENABLED", True)
                 ):
@@ -478,12 +547,16 @@ def run_loop() -> None:
                             reply = phrases.pick("nudge")
                             _log_line("NUDGE", f"{tid} | {reply}")
                             force_piper = bool(getattr(config, "TTS_PREFER_PIPER_FOR_NUDGE", True))
-                            kind, duration = _speak_reply(
+                            interrupted, kind, duration = _speak_reply_with_barge_in(
                                 reply,
+                                conversation_mode=conversation_mode,
                                 prefer_online=not force_piper,
                                 force_piper=force_piper,
                                 tid=tid,
                             )
+                            if interrupted:
+                                pending_user_text = interrupted
+                                continue
                             _log_line("TTS", f"{tid} | {kind} | nudge | duration={duration:.1f}s")
                             last_nudge_at = now
                         else:
@@ -523,17 +596,27 @@ def run_loop() -> None:
                 _log_line("MODE", f"{tid} | conversation_mode=on | trigger=activate")
                 reply = phrases.pick("activate")
                 _log_line("RESPONSE", reply)
-                kind, duration = _speak_reply(reply, prefer_online=True, tid=tid)
+                interrupted, kind, duration = _speak_reply_with_barge_in(
+                    reply, conversation_mode=conversation_mode, prefer_online=True, tid=tid
+                )
+                if interrupted:
+                    pending_user_text = interrupted
+                    continue
                 _log_line("TTS", f"{tid} | {kind} | synth+play={duration:.1f}s | text_len={len(reply)}")
                 stt.record_dialogue_turn_for_stt(text, reply)
                 continue
 
             if conversation_mode and _has_any_phrase(text, config.CONVERSATION_DEACTIVATE_PHRASES):
-                conversation_mode = False
                 _log_line("MODE", f"{tid} | conversation_mode=off | trigger=deactivate")
                 reply = phrases.pick("deactivate")
                 _log_line("RESPONSE", reply)
-                kind, duration = _speak_reply(reply, prefer_online=True, tid=tid)
+                interrupted, kind, duration = _speak_reply_with_barge_in(
+                    reply, conversation_mode=True, prefer_online=True, tid=tid
+                )
+                if interrupted:
+                    pending_user_text = interrupted
+                    continue
+                conversation_mode = False
                 _log_line("TTS", f"{tid} | {kind} | synth+play={duration:.1f}s | text_len={len(reply)}")
                 stt.clear_stt_dialogue_hint()
                 continue
@@ -596,6 +679,7 @@ def run_loop() -> None:
 
             t_route0 = time.perf_counter()
             tts_via_llm_stream = False
+            llm_interrupted: str | None = None
             reply: str | None = route_intents(text)
             if reply is None:
                 has_net = tts.internet_available()
@@ -618,12 +702,14 @@ def run_loop() -> None:
                         try:
                             _log_line("SENT_TO_LLM", text)
                             t_llm0 = time.perf_counter()
-                            reply = _llm_reply_and_speak(text, tid)
+                            reply, llm_interrupted = _llm_reply_and_speak(
+                                text, tid, conversation_mode=conversation_mode
+                            )
                             tts_via_llm_stream = True
                             t_llm1 = time.perf_counter()
                             _log_line(
                                 "LLM_DONE",
-                                f"{tid} | total_with_tts={_fmt_ms(t_llm1 - t_llm0)}",
+                                f"{tid} | total_with_tts={_fmt_ms(t_llm1 - t_llm0)} | interrupted={bool(llm_interrupted)}",
                             )
                         except Exception as e:
                             logger.warning("LLM hatası: %s", e)
@@ -640,20 +726,34 @@ def run_loop() -> None:
             assert reply is not None
             _log_line("RESPONSE", reply)
 
-            memory.append_conversation_line("Kullanıcı", text)
-            memory.append_conversation_line("Kanka", reply)
-            stt.record_dialogue_turn_for_stt(text, reply)
+            if llm_interrupted:
+                memory.append_conversation_line("Kullanıcı", text)
+                pending_user_text = llm_interrupted
+                continue
 
             if not tts_via_llm_stream:
                 t_tts0 = time.perf_counter()
-                kind, duration = _speak_reply(reply, prefer_online=True, tid=tid)
+                interrupted, kind, duration = _speak_reply_with_barge_in(
+                    reply,
+                    conversation_mode=conversation_mode,
+                    prefer_online=True,
+                    tid=tid,
+                )
                 t_tts1 = time.perf_counter()
+                if interrupted:
+                    memory.append_conversation_line("Kullanıcı", text)
+                    pending_user_text = interrupted
+                    continue
                 _log_line(
                     "TTS",
                     f"{tid} | {kind} | synth+play={duration:.1f}s | call_elapsed={_fmt_ms(t_tts1 - t_tts0)} | text_len={len(reply)}",
                 )
             else:
                 _log_line("TTS", f"{tid} | streamed_during_llm | text_len={len(reply)}")
+
+            memory.append_conversation_line("Kullanıcı", text)
+            memory.append_conversation_line("Kanka", reply)
+            stt.record_dialogue_turn_for_stt(text, reply)
 
         except KeyboardInterrupt:
             logger.info("Kullanıcı durdurdu.")

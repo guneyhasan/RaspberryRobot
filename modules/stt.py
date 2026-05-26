@@ -503,10 +503,15 @@ def listen_for_speech_and_transcribe(
     timeout_sec: float,
     *,
     require_wake: bool = True,
+    vad_threshold: float | None = None,
 ) -> tuple[str, float]:
     """Süre dolana kadar bekler; konuşma varsa transkribe eder."""
     t0 = time.perf_counter()
-    audio = vad.listen_for_speech(timeout_sec, on_partial=_vad_on_partial())
+    audio = vad.listen_for_speech(
+        timeout_sec,
+        vad_threshold=vad_threshold,
+        on_partial=_vad_on_partial(),
+    )
     t1 = time.perf_counter()
     if audio is None:
         logger.info("STT: idle timeout / konuşma yok (elapsed=%0.1fs)", t1 - t0)
