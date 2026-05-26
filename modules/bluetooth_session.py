@@ -278,6 +278,20 @@ def _bt_is_connected(mac: str) -> bool:
     return "Connected: yes" in _bt_device_info(mac)
 
 
+def _wait_bt_connected(mac: str, timeout_sec: float | None = None) -> bool:
+    """connect sonrası Connected: yes gelene kadar bekle (AirPods vb. gecikir)."""
+    timeout_sec = timeout_sec if timeout_sec is not None else float(
+        getattr(config, "BLUETOOTH_BT_CONNECT_WAIT_SEC", 15)
+    )
+    mac = _normalize_mac(mac)
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        if _bt_is_connected(mac):
+            return True
+        time.sleep(0.4)
+    return False
+
+
 def disconnect_device(mac: str | None = None) -> None:
     """Kulaklığı kes; adaptör açık kalır (yeniden bağlanma için önerilir)."""
     if mac:
@@ -519,7 +533,7 @@ connect {mac}
         out = out + out2
         if "Failed" in out2 and "Connected: yes" not in out2:
             return False, "Bağlantı kurulamadı kanka."
-    if not _bt_is_connected(mac):
+    if not _wait_bt_connected(mac):
         return False, "Bağlantı kurulamadı kanka."
     return True, ""
 
@@ -849,41 +863,101 @@ def sync_headphone_from_system() -> list[str]:
     ]
 
 
-def _try_auto_connect_paired(paired: list[tuple[str, str]]) -> list[str] | None:
-    """Eşleşmiş cihaza bağlan; A2DP bekleme _finish_connect içinde."""
-    """Tek eşleşmiş veya son kullanılan cihaza otomatik bağlan."""
+def _filter_active_paired(paired: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """
+    Eşleşmiş cihazlardan şu an 'aktif' olanlar: bağlı, bluealsa PCM'de veya kısa taramada görünen.
+    """
+    if not paired:
+        return []
+
+    pcm_macs = {_normalize_mac(m) for m, _ in list_bluealsa_playback_pcms(log=False)}
+    active: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    for mac, name in paired:
+        mac_n = _normalize_mac(mac)
+        if mac_n in seen:
+            continue
+        if mac_n in pcm_macs or _bt_is_connected(mac_n):
+            active.append((mac_n, name))
+            seen.add(mac_n)
+
+    if active:
+        return active
+
+    if len(paired) <= 1:
+        return active
+
+    scan_sec = float(getattr(config, "BLUETOOTH_ACTIVE_SCAN_SEC", 4))
+    if scan_sec <= 0:
+        return active
+
+    out = _bluetoothctl_live_scan(scan_sec)
+    visible = {_normalize_mac(m) for m, _ in _parse_devices(out)}
+    for mac, name in paired:
+        mac_n = _normalize_mac(mac)
+        if mac_n in seen:
+            continue
+        if mac_n in visible:
+            active.append((mac_n, name))
+            seen.add(mac_n)
+
+    logger.info(
+        "BT aktif eşleşmiş: %s (toplam eşleşmiş=%s, tarama=%ss)",
+        [n for _, n in active],
+        len(paired),
+        scan_sec,
+    )
+    return active
+
+
+def _auto_connect_targets(paired: list[tuple[str, str]]) -> list[tuple[str, str]] | None:
+    """
+    Otomatik bağlanılacak hedef(ler).
+    None → liste göster (birden fazla aktif veya hiç aktif yok + çoklu eşleşmiş).
+  Tek elemanlı liste → otomatik bağlan.
+    """
     if not paired:
         return None
 
-    auto = bool(getattr(config, "BLUETOOTH_AUTO_CONNECT_PAIRED", True))
-    if not auto:
+    if len(paired) == 1:
+        return list(paired)
+
+    active = _filter_active_paired(paired)
+    if len(active) == 1:
+        return active
+    if len(active) > 1:
         return None
 
-    candidates: list[tuple[str, str]] = []
-    last = _load_last_mac()
-    if last:
-        for mac, name in paired:
-            if mac == last:
-                candidates.append((mac, name))
-                break
-    if not candidates:
-        candidates = list(paired)
-
-    if len(paired) == 1:
-        candidates = list(paired)
-
-    for mac, name in candidates:
-        logger.info("BT otomatik bağlanıyor: %s (%s)", name, mac)
-        ok, err = connect_mac(mac, try_pair=False)
-        if ok:
-            return _finish_connect(mac, name, index=1)
-
-    if len(paired) == 1:
-        return [
-            phrases.pick("bt_error_connect", fallback="Eşleşmiş cihaza bağlanamadım kanka."),
-        ]
-
     return None
+
+
+def _try_auto_connect_paired(paired: list[tuple[str, str]]) -> list[str] | None:
+    """Tek hedef veya tek aktif cihaza otomatik bağlan; A2DP _finish_connect içinde."""
+    if not paired:
+        return None
+
+    if not bool(getattr(config, "BLUETOOTH_AUTO_CONNECT_PAIRED", True)):
+        return None
+
+    targets = _auto_connect_targets(paired)
+    if not targets:
+        logger.info(
+            "BT otomatik bağlantı atlandı (eşleşmiş=%s, aktif=%s)",
+            len(paired),
+            len(_filter_active_paired(paired)),
+        )
+        return None
+
+    mac, name = targets[0]
+    logger.info("BT otomatik bağlanıyor: %s (%s)", name, mac)
+    ok, _err = connect_mac(mac, try_pair=False)
+    if ok:
+        return _finish_connect(mac, name, index=1)
+
+    return [
+        phrases.pick("bt_error_connect", fallback="Eşleşmiş cihaza bağlanamadım kanka."),
+    ]
 
 
 def open_mode() -> list[str]:
@@ -907,8 +981,11 @@ def open_mode() -> list[str]:
     ]
 
     paired = list_paired_devices()
-    _try_auto_connect_paired(paired)
+    auto_extra = _try_auto_connect_paired(paired)
+
     if _session.phase == "connected":
+        if auto_extra:
+            return replies + auto_extra
         return replies + [
             phrases.pick(
                 "bt_auto_connected",
@@ -916,7 +993,22 @@ def open_mode() -> list[str]:
             )
         ]
 
+    if auto_extra:
+        return replies + auto_extra
+
     if paired:
+        active = _filter_active_paired(paired)
+        if len(active) > 1:
+            _session.devices = _numbered_list(active)
+            _session.phase = "awaiting"
+            _session.discovered_only = False
+            replies += _list_replies(
+                "bt_active_multi_intro",
+                _session.devices,
+                scan_hint=False,
+            )
+            return replies
+
         _session.devices = _numbered_list(paired)
         _session.phase = "awaiting"
         _session.discovered_only = False

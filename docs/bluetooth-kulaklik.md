@@ -52,7 +52,7 @@ trust AA:BB:CC:DD:EE:FF
 
 | Komut | Sonuç |
 |-------|--------|
-| kanka bluetooth kulaklık modunu aç | Eşleşmiş varsa otomatik bağlan; yoksa tara ve listele |
+| kanka bluetooth kulaklık modunu aç | Tek eşleşmiş → otomatik bağlan; çoklu eşleşmişte yalnızca **aktif** (bağlı/yakında) tek cihaz varsa otomatik; birden fazla aktifse numara seç |
 | kanka 2 numaraya bağlan | 2. cihaza bağlan (gerekirse eşleştirir) |
 | kanka 2 numaraya eşleştir | 2. cihazı pair + bağlan |
 | yeniden tara / tekrar tara | Yakındaki cihazları yeniden listele |

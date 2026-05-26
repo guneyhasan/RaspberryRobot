@@ -95,6 +95,10 @@
     "Eşleşmiş kulaklığa bağlandım kanka, ses kulaklıktan geliyor.",
     "Tamam kanka, kayıtlı kulaklığa bağlandım."
   ],
+  "bt_active_multi_intro": [
+    "Birden fazla aktif kulaklık var kanka, hangisine bağlanayım?",
+    "Şu an yakında birden fazla eşleşmiş cihaz var kanka, numara söyle:"
+  ],
   "bt_paired_list_intro": [
     "Eşleşmiş cihazların kanka:",
     "Daha önce eşleştirdiğin cihazlar bunlar kanka:"
