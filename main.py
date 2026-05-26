@@ -210,7 +210,19 @@ def _system_poweroff(reason: str) -> None:
     except Exception:
         pass
     try:
-        subprocess.run(["sudo", "poweroff"], check=False)
+        r = subprocess.run(
+            ["sudo", "-n", "poweroff"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if r.returncode != 0:
+            logger.error(
+                "poweroff başarısız (rc=%s). Şifresiz sudo yoksa: bash scripts/setup_poweroff_sudo.sh | stderr=%s",
+                r.returncode,
+                (r.stderr or "").strip() or "(boş)",
+            )
     except Exception as e:
         logger.error("poweroff çalıştırılamadı: %s", e)
 

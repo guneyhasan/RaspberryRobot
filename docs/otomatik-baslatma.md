@@ -82,12 +82,24 @@ tail -f logs/health_err.log
 
 ## Sesli tam kapanma
 
-Robot çalışırken *"kanka robotu tamamen kapat"* (veya *"robotu tamamen kapat"*) deyince kısa bir veda cümlesi duyulur, ardından `sudo poweroff` ile Pi kapanır. Kritik pil kapanmasıyla aynı komut kullanılır; şifresiz `sudo` gerekirse:
+Robot çalışırken *"kanka robotu tamamen kapat"* (veya *"robotu tamamen kapat"*) deyince kısa bir veda cümlesi duyulur, ardından `sudo -n poweroff` ile Pi kapanır. Kritik pil kapanmasıyla aynı komut kullanılır.
+
+**Şifre soruyorsa** (log: `password for …` veya `poweroff başarısız`), servis kullanıcısı için bir kerelik:
 
 ```bash
-sudo visudo
-# KULLANICI ALL=(ALL) NOPASSWD: /sbin/poweroff, /sbin/shutdown
+cd /home/KULLANICI/proje-dizini
+bash scripts/setup_poweroff_sudo.sh    # varsayılan: whoami
+# veya açık kullanıcı adı:
+bash scripts/setup_poweroff_sudo.sh rblocal3
 ```
+
+Test (çıktı `OK`, şifre istememeli):
+
+```bash
+sudo -n poweroff --help
+```
+
+`scripts/install.sh` bu adımı kurulumda otomatik dener.
 
 *"Görüşürüz kanka"* yalnızca konuşma modunu kapatır; sistemi kapatmaz.
 

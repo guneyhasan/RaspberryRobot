@@ -114,6 +114,11 @@ fi
 
 sudo systemctl daemon-reload
 sudo systemctl enable robot-kanka.service
+
+echo "[install] Şifresiz kapanma (sudo poweroff)..."
+bash "${SCRIPT_DIR}/setup_poweroff_sudo.sh" "${PI_USER}" || \
+  echo "[install] UYARI: setup_poweroff_sudo.sh başarısız — sesli kapanma şifre sorabilir."
+
 echo "[install] Servis kuruldu. Başlat: sudo systemctl start robot-kanka"
 echo "[install] Log: journalctl -u robot-kanka -f  |  /var/log/robot-kanka.log"
 echo "[install] Detay: docs/otomatik-baslatma.md"
