@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import signal
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -187,6 +188,31 @@ def _has_any_phrase(text: str, phrases_tuple: tuple[str, ...]) -> bool:
         if norm(p) in t:
             return True
     return False
+
+
+POWEROFF_VOICE_TRIGGERS = (
+    "kanka robotu tamamen kapat",
+    "robotu tamamen kapat",
+    "kanka robotu tamamen kapa",
+    "robotu tamamen kapa",
+)
+
+
+def _text_matches_poweroff_intent(text: str) -> bool:
+    low = (text or "").lower().strip()
+    return any(t in low for t in POWEROFF_VOICE_TRIGGERS)
+
+
+def _system_poweroff(reason: str) -> None:
+    _log_line("POWEROFF", reason)
+    try:
+        motion.safe_stop(reason)
+    except Exception:
+        pass
+    try:
+        subprocess.run(["sudo", "poweroff"], check=False)
+    except Exception as e:
+        logger.error("poweroff çalıştırılamadı: %s", e)
 
 
 def route_intents(text: str) -> str | None:
@@ -377,6 +403,9 @@ def route_intents(text: str) -> str | None:
             logger.exception("Vision/kamera hatası")
             return "Kamerada sorun oldu kanka, bir daha dener misin?"
 
+    if _text_matches_poweroff_intent(text):
+        return "Tamam kanka, kapanıyorum. Görüşürüz."
+
     return memory.try_handle_memory_command(text)
 
 
@@ -447,7 +476,6 @@ def run_loop() -> None:
 
     # Pil izleme thread'i (Robot-HAT voltajından % hesaplar)
     import threading
-    import subprocess
 
     stop_batt = threading.Event()
 
@@ -466,14 +494,7 @@ def run_loop() -> None:
             tts.speak(msg, prefer_online=False)
         except Exception as e:
             logger.warning("Kritik pil TTS atlandı: %s", e)
-        try:
-            motion.safe_stop("battery_critical")
-        except Exception:
-            pass
-        try:
-            subprocess.run(["sudo", "poweroff"], check=False)
-        except Exception as e:
-            logger.error("poweroff çalıştırılamadı: %s", e)
+        _system_poweroff("battery_critical")
 
     batt_th = threading.Thread(
         target=battery.monitor_loop,
@@ -680,6 +701,7 @@ def run_loop() -> None:
             t_route0 = time.perf_counter()
             tts_via_llm_stream = False
             llm_interrupted: str | None = None
+            poweroff_after_tts = _text_matches_poweroff_intent(text)
             reply: str | None = route_intents(text)
             if reply is None:
                 has_net = tts.internet_available()
@@ -750,6 +772,12 @@ def run_loop() -> None:
                 )
             else:
                 _log_line("TTS", f"{tid} | streamed_during_llm | text_len={len(reply)}")
+
+            if poweroff_after_tts and reply is not None and not llm_interrupted and not tts_via_llm_stream:
+                memory.append_conversation_line("Kullanıcı", text)
+                memory.append_conversation_line("Kanka", reply)
+                _system_poweroff("voice_command")
+                break
 
             memory.append_conversation_line("Kullanıcı", text)
             memory.append_conversation_line("Kanka", reply)

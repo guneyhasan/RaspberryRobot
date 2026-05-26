@@ -80,6 +80,17 @@ tail -f logs/robot-kanka-app.log
 tail -f logs/health_err.log
 ```
 
+## Sesli tam kapanma
+
+Robot çalışırken *"kanka robotu tamamen kapat"* (veya *"robotu tamamen kapat"*) deyince kısa bir veda cümlesi duyulur, ardından `sudo poweroff` ile Pi kapanır. Kritik pil kapanmasıyla aynı komut kullanılır; şifresiz `sudo` gerekirse:
+
+```bash
+sudo visudo
+# KULLANICI ALL=(ALL) NOPASSWD: /sbin/poweroff, /sbin/shutdown
+```
+
+*"Görüşürüz kanka"* yalnızca konuşma modunu kapatır; sistemi kapatmaz.
+
 ## Test
 
 - **T1:** Prize tak → ~30 sn içinde açılış anonsu (`STARTUP_PHRASE`)
