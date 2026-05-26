@@ -154,17 +154,21 @@ def _env_bool(key: str, default: bool) -> bool:
 def _default_whisper_stt_backend() -> str:
     """
     groq:   Groq Whisper API (~0.3s, internet gerekli, GROQ_API_KEY şart)
+    openai: OpenAI Whisper API (internet gerekli, OPENAI_API_KEY şart)
     server: yerel whisper-server (model bellekte kalır, ~3-6s Pi'de)
     cli:    her seferinde whisper-cli başlatır (en yavaş)
 
-    Öncelik: 1) WHISPER_STT_BACKEND env'i 2) groq key varsa groq 3) server binary varsa server 4) cli
+    Öncelik: 1) WHISPER_STT_BACKEND 2) groq key → groq 3) OPENAI_STT_AUTO+key → openai
+              4) server binary varsa server 5) cli
     """
     explicit = os.getenv("WHISPER_STT_BACKEND", "").strip().lower()
-    if explicit in ("groq", "server", "cli"):
+    if explicit in ("groq", "openai", "server", "cli"):
         return explicit
     # GROQ_API_KEY varsa otomatik olarak Groq Whisper API kullan (çok daha hızlı)
     if os.getenv("GROQ_API_KEY", "").strip():
         return "groq"
+    if _env_bool("OPENAI_STT_AUTO", False) and os.getenv("OPENAI_API_KEY", "").strip():
+        return "openai"
     return "server" if WHISPER_SERVER_BINARY.is_file() else "cli"
 
 
@@ -346,6 +350,12 @@ LLM_PROVIDER = _env_str("LLM_PROVIDER", "").lower()
 # whisper-large-v3:       daha doğru ama biraz yavaş
 GROQ_STT_MODEL = _env_str("GROQ_STT_MODEL", "whisper-large-v3-turbo")
 GROQ_STT_TIMEOUT_SEC = float(os.getenv("GROQ_STT_TIMEOUT_SEC", "15.0"))
+
+# OpenAI Whisper STT (WHISPER_STT_BACKEND=openai veya OPENAI_STT_AUTO=1)
+# whisper-1 | gpt-4o-mini-transcribe | gpt-4o-transcribe
+OPENAI_STT_MODEL = _env_str("OPENAI_STT_MODEL", "whisper-1")
+OPENAI_STT_TIMEOUT_SEC = float(os.getenv("OPENAI_STT_TIMEOUT_SEC", "30.0"))
+OPENAI_STT_AUTO = _env_bool("OPENAI_STT_AUTO", False)
 
 # Groq vision modeli (görüntü yorumlama)
 # llama-4-scout hızlı ve ücretsiz tier'da çalışır

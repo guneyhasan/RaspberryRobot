@@ -1,9 +1,10 @@
-"""Yerel whisper.cpp ile Türkçe STT.
+"""Türkçe STT: bulut (Groq/OpenAI Whisper API) veya yerel whisper.cpp.
 
-Varsayılan: `whisper-server` — model başlangıçta bir kez yüklenir, her utterance HTTP ile
-gönderilir (her seferinde `whisper-cli` çalıştırmaktan çok daha hızlı).
-
-Eski davranış: WHISPER_STT_BACKEND=cli
+WHISPER_STT_BACKEND:
+  groq   — Groq Whisper API
+  openai — OpenAI Audio Transcriptions API
+  server — yerel whisper-server (model bellekte)
+  cli    — her seferinde whisper-cli
 """
 from __future__ import annotations
 
@@ -70,19 +71,27 @@ def _uses_groq() -> bool:
     return getattr(config, "WHISPER_STT_BACKEND", "cli") == "groq"
 
 
-def _transcribe_via_groq(wav_path: Path) -> tuple[str, float]:
-    """Groq Whisper API ile hızlı bulut STT (~0.2–0.4s, yerel yerine)."""
-    api_key = getattr(config, "GROQ_API_KEY", "")
-    if not api_key:
-        raise RuntimeError("GROQ_API_KEY ayarlı değil — Groq STT kullanılamaz")
+def _uses_openai() -> bool:
+    return getattr(config, "WHISPER_STT_BACKEND", "cli") == "openai"
 
-    model = getattr(config, "GROQ_STT_MODEL", "whisper-large-v3-turbo")
-    url = "https://api.groq.com/openai/v1/audio/transcriptions"
 
-    with open(wav_path, "rb") as f:
-        wav_data = f.read()
+def _uses_cloud_whisper() -> bool:
+    return _uses_groq() or _uses_openai()
 
-    boundary = f"----grqSTT{uuid.uuid4().hex}"
+
+def _cloud_whisper_dialog_prompt() -> str:
+    if not getattr(config, "WHISPER_STT_DIALOG_HINT", True):
+        return ""
+    with _dialog_lock:
+        tail = _dialog_prompt_tail.strip()
+    if not tail:
+        return ""
+    mx = max(32, int(getattr(config, "WHISPER_STT_PROMPT_MAX_CHARS", 200)))
+    return tail[:mx]
+
+
+def _build_cloud_whisper_multipart(wav_data: bytes, *, model: str, boundary_prefix: str) -> tuple[bytes, str]:
+    boundary = f"----{boundary_prefix}{uuid.uuid4().hex}"
     crlf = b"\r\n"
     parts: list[bytes] = []
 
@@ -100,17 +109,32 @@ def _transcribe_via_groq(wav_path: Path) -> tuple[str, float]:
     _field("language", "tr")
     _field("response_format", "json")
 
-    # Dialog bağlamı prompt olarak gönder (Whisper'ı doğrulama için)
-    if getattr(config, "WHISPER_STT_DIALOG_HINT", True):
-        with _dialog_lock:
-            tail = _dialog_prompt_tail.strip()
-        if tail:
-            mx = max(32, int(getattr(config, "WHISPER_STT_PROMPT_MAX_CHARS", 200)))
-            _field("prompt", tail[:mx])
+    prompt = _cloud_whisper_dialog_prompt()
+    if prompt:
+        _field("prompt", prompt)
 
     parts.append(f"--{boundary}--".encode() + crlf)
-    body = b"".join(parts)
+    return b"".join(parts), boundary
 
+
+def _transcribe_via_cloud_whisper_api(
+    wav_path: Path,
+    *,
+    provider_label: str,
+    api_key: str,
+    model: str,
+    url: str,
+    timeout_sec: float,
+    boundary_prefix: str,
+) -> tuple[str, float]:
+    """OpenAI uyumlu /audio/transcriptions endpoint (Groq veya OpenAI)."""
+    if not api_key:
+        raise RuntimeError(f"{provider_label} API anahtarı ayarlı değil")
+
+    with open(wav_path, "rb") as f:
+        wav_data = f.read()
+
+    body, boundary = _build_cloud_whisper_multipart(wav_data, model=model, boundary_prefix=boundary_prefix)
     req = Request(
         url,
         data=body,
@@ -122,9 +146,8 @@ def _transcribe_via_groq(wav_path: Path) -> tuple[str, float]:
             "Accept": "application/json",
         },
     )
-    to = float(getattr(config, "GROQ_STT_TIMEOUT_SEC", 15.0))
     try:
-        with urlopen(req, timeout=to) as resp:
+        with urlopen(req, timeout=timeout_sec) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
     except HTTPError as e:
         err_body = ""
@@ -132,24 +155,50 @@ def _transcribe_via_groq(wav_path: Path) -> tuple[str, float]:
             err_body = e.read().decode("utf-8", errors="replace")[:800]
         except Exception:
             pass
-        logger.error("Groq STT HTTP %s: %s", e.code, err_body)
-        raise RuntimeError(f"Groq STT HTTP {e.code}: {err_body}") from e
+        logger.error("%s STT HTTP %s: %s", provider_label, e.code, err_body)
+        raise RuntimeError(f"{provider_label} STT HTTP {e.code}: {err_body}") from e
     except URLError as e:
-        logger.error("Groq STT bağlantı hatası: %s", e)
-        raise RuntimeError(f"Groq STT erişilemedi: {e}") from e
+        logger.error("%s STT bağlantı hatası: %s", provider_label, e)
+        raise RuntimeError(f"{provider_label} STT erişilemedi: {e}") from e
 
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
-        logger.error("Groq STT JSON parse: %s | body=%s", e, raw[:400])
-        raise RuntimeError("Groq STT geçersiz JSON") from e
+        logger.error("%s STT JSON parse: %s | body=%s", provider_label, e, raw[:400])
+        raise RuntimeError(f"{provider_label} STT geçersiz JSON") from e
 
     if isinstance(data, dict) and data.get("error"):
-        raise RuntimeError(f"Groq STT: {data['error']}")
+        raise RuntimeError(f"{provider_label} STT: {data['error']}")
 
     text = (data.get("text") or "").strip() if isinstance(data, dict) else ""
     conf = 0.94 if text else 0.0
     return text, conf
+
+
+def _transcribe_via_groq(wav_path: Path) -> tuple[str, float]:
+    """Groq Whisper API ile hızlı bulut STT (~0.2–0.4s, yerel yerine)."""
+    return _transcribe_via_cloud_whisper_api(
+        wav_path,
+        provider_label="Groq",
+        api_key=getattr(config, "GROQ_API_KEY", ""),
+        model=getattr(config, "GROQ_STT_MODEL", "whisper-large-v3-turbo"),
+        url="https://api.groq.com/openai/v1/audio/transcriptions",
+        timeout_sec=float(getattr(config, "GROQ_STT_TIMEOUT_SEC", 15.0)),
+        boundary_prefix="grqSTT",
+    )
+
+
+def _transcribe_via_openai(wav_path: Path) -> tuple[str, float]:
+    """OpenAI Audio Transcriptions API (whisper-1 vb.)."""
+    return _transcribe_via_cloud_whisper_api(
+        wav_path,
+        provider_label="OpenAI",
+        api_key=getattr(config, "OPENAI_API_KEY", ""),
+        model=getattr(config, "OPENAI_STT_MODEL", "whisper-1"),
+        url="https://api.openai.com/v1/audio/transcriptions",
+        timeout_sec=float(getattr(config, "OPENAI_STT_TIMEOUT_SEC", 30.0)),
+        boundary_prefix="oaiSTT",
+    )
 
 
 def _server_base() -> str:
@@ -246,6 +295,14 @@ def ensure_whisper_backend_ready() -> None:
     """Uygulama açılışında veya ilk STT öncesi: server modunda süreç + model yüklemesi."""
     if _uses_groq():
         logger.info("STT: backend=groq (Groq Whisper API) — yerel sunucu başlatılmıyor")
+        return
+    if _uses_openai():
+        if not config.OPENAI_API_KEY:
+            raise RuntimeError("WHISPER_STT_BACKEND=openai ama OPENAI_API_KEY tanımlı değil")
+        logger.info(
+            "STT: backend=openai (OpenAI Whisper API, model=%s) — yerel sunucu başlatılmıyor",
+            getattr(config, "OPENAI_STT_MODEL", "whisper-1"),
+        )
         return
     if not _uses_server():
         return
@@ -402,18 +459,20 @@ def transcribe_pcm_cli(pcm_int16: np.ndarray, sample_rate: int | None = None) ->
 
 def transcribe_pcm(pcm_int16: np.ndarray, sample_rate: int | None = None) -> tuple[str, float]:
     """
-    Groq Whisper API (hızlı, bulut), whisper-server (kalıcı model) veya whisper-cli.
+    Bulut Whisper API (Groq/OpenAI), whisper-server (kalıcı model) veya whisper-cli.
     """
     global _server_proc
     sr = sample_rate or config.SAMPLE_RATE
 
-    # ── Groq Whisper API (en hızlı seçenek) ────────────────────────────────
-    if _uses_groq():
+    # ── Bulut Whisper API (Groq / OpenAI) ───────────────────────────────────
+    if _uses_cloud_whisper():
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             wav_path = Path(f.name)
         try:
             vad.save_wav_int16(wav_path, pcm_int16, sr)
-            return _transcribe_via_groq(wav_path)
+            if _uses_groq():
+                return _transcribe_via_groq(wav_path)
+            return _transcribe_via_openai(wav_path)
         finally:
             wav_path.unlink(missing_ok=True)
 
