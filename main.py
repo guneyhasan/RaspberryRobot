@@ -96,15 +96,19 @@ def _speak_reply_with_barge_in(
 ) -> tuple[str | None, str, float]:
     """Dönüş: (kesinti_metni veya None, tts_kind, süre_s)."""
 
-    def _do(txt: str) -> tuple[str, float]:
-        return _speak_reply(
-            txt,
-            prefer_online=prefer_online,
-            force_piper=force_piper,
-            tid=tid,
-        )
-
     if barge_in.should_use_barge_in(conversation_mode=conversation_mode):
+        spoken: list[tuple[str, float]] = []
+
+        def _do(txt: str) -> tuple[str, float]:
+            r = _speak_reply(
+                txt,
+                prefer_online=prefer_online,
+                force_piper=force_piper,
+                tid=tid,
+            )
+            spoken.append(r)
+            return r
+
         interrupted = barge_in.speak_with_barge_in(
             _do,
             reply,
@@ -113,6 +117,9 @@ def _speak_reply_with_barge_in(
         )
         if interrupted:
             return interrupted, "barge-in", 0.0
+        kind, duration = spoken[0] if spoken else ("barge-in", 0.0)
+        return None, kind, duration
+
     kind, duration = _speak_reply(
         reply,
         prefer_online=prefer_online,
