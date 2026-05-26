@@ -417,10 +417,9 @@ def route_intents(text: str) -> str | None:
     if is_vision_cmd:
         if not config.OPENAI_API_KEY and not config.GROQ_API_KEY:
             return "Görmem için en az bir API anahtarı lazım kanka."
-        # Kamera kapalıysa önce aç
+        # Kamera (gözler) kullanıcı komutuyla açılmalı; kapalıysa vision çalıştırma.
         if not camera.is_camera_enabled():
-            camera.set_camera_enabled(True)
-            logger.info("Vision komutu: kamera otomatik açıldı")
+            return "Kanka önce gözlerimi açman lazım. “Gözlerini aç” de, sonra bakayım."
         try:
             if camera.camera_frozen():
                 logger.warning("Kamera kilit şüphesi — yeniden denenecek.")
